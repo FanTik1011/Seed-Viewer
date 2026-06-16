@@ -4,18 +4,18 @@ const WORKER_URL = "/static/seed-worker.js";
 const SAMPLE_SCALE = 8;
 const TILE_SAMPLES = TILE_BLOCKS / SAMPLE_SCALE;
 const MAX_TILE_CACHE = 1200;
-const MAX_TILE_QUEUE = 360;
-// Concurrent in-flight tile fetches. Spread across a pool of workers so fetch +
-// JSON parsing of biome grids happens in parallel instead of on one thread.
-const MAX_TILE_REQUESTS = 16;
+const MAX_TILE_QUEUE = 900;
+const MAX_TILE_REQUESTS = Math.max(24, Math.min(64, (navigator.hardwareConcurrency || 4) * 6));
 const MAX_DRAW_TILES = 420;
 const TILE_REQUEST_TIMEOUT = 9000;
 const MAX_TILE_ATTEMPTS = 3;
 const TILE_RETRY_PENALTY = 4000;
-const PREFETCH_MARGIN = 2;
-// Number of seed-worker threads. Each one can hold several fetches open and
-// parse responses independently, so the visible viewport fills much faster.
-const WORKER_POOL_SIZE = Math.max(2, Math.min(8, (navigator.hardwareConcurrency || 4)));
+const PREFETCH_MARGIN = 1;
+
+const WORKER_POOL_SIZE = Math.max(4, Math.min(16, (navigator.hardwareConcurrency || 4)));
+const VISIBLE_TILE_PRIORITY_BOOST = 1_000_000;
+const COARSE_TILE_PRIORITY_BOOST = 500_000;
+const TILE_BUILD_BATCH = 24;
 
 
 const LODS = [
@@ -25,10 +25,9 @@ const LODS = [
   { blocks: 16384, samples: 256, scale: 64 }
 ];
 const MIN_ZOOM = 0.5;
-// Hard cap on zoom-out: you can never see coarser than 3.2 blocks per pixel.
-// This is also the default, so the world opens at its most zoomed-out state.
-const MAX_ZOOM = 3.2;
-const DEFAULT_ZOOM = 3.2;
+
+const MAX_ZOOM = 2.2;
+const DEFAULT_ZOOM = 2.0;
 const ZOOM_EASE = 0.25;
 const PAN_FRICTION = 0.9;
 const INITIAL_SCAN_RADIUS = 6144;
@@ -394,12 +393,10 @@ const workerJobs = new Map();
 let urlTimer = 0;
 let autoLoadTimer = 0;
 let tileBuildPending = false;
+let tilePumpPending = false;
 const tileBuildQueue = [];
 
-// A small pool of identical workers. Tile work (fetch + JSON.parse of the biome
-// grid) is spread round-robin across them, so several chunks resolve at once
-// instead of queueing behind a single thread. Each job remembers its worker so
-// a per-worker crash only rejects that worker's jobs.
+
 function initWorker() {
   if (!("Worker" in window)) return;
   workerPool = [];
@@ -710,6 +707,7 @@ function render() {
     : "Biome streaming for this dimension needs a rebuilt native library";
   trimTileQueueToView(range);
   if (detailedBiomes) {
+    queueCoarseFallbacks(range);
     drawBiomes(range);
     prefetchAround(range);
   } else {
@@ -734,6 +732,26 @@ function prefetchAround(range) {
     for (let tx = range.txMin - PREFETCH_MARGIN; tx <= range.txMax + PREFETCH_MARGIN; tx++) {
       if (tx >= range.txMin && tx <= range.txMax && tz >= range.tzMin && tz <= range.tzMax) continue;
       queueTile(range.lod, tx, tz);
+    }
+  }
+}
+
+function queueCoarseFallbacks(range) {
+  if (!state.showBiomes || !dimensionCaps().biomes || range.lod >= LODS.length - 1) return;
+  const startX = range.txMin * range.blocks;
+  const endX = (range.txMax + 1) * range.blocks - 1;
+  const startZ = range.tzMin * range.blocks;
+  const endZ = (range.tzMax + 1) * range.blocks - 1;
+  for (let lod = LODS.length - 1; lod > range.lod; lod--) {
+    const cfg = LODS[lod];
+    const txMin = Math.floor(startX / cfg.blocks);
+    const txMax = Math.floor(endX / cfg.blocks);
+    const tzMin = Math.floor(startZ / cfg.blocks);
+    const tzMax = Math.floor(endZ / cfg.blocks);
+    for (let tz = tzMin; tz <= tzMax; tz++) {
+      for (let tx = txMin; tx <= txMax; tx++) {
+        queueTile(lod, tx, tz, true);
+      }
     }
   }
 }
@@ -777,7 +795,7 @@ function drawBiomes(range) {
         ctx.fillStyle = ((tx + tz) & 1) ? "#101411" : "#0d110f";
         ctx.fillRect(pos.x, pos.y, tilePx + 1, tilePx + 1);
       }
-      if (state.showBiomes && !tile) queueTile(range.lod, tx, tz);
+      if (state.showBiomes && !tile) queueTile(range.lod, tx, tz, true);
     }
   }
 }
@@ -1073,15 +1091,27 @@ function roundRect(x, y, w, h, r, fill, stroke) {
   if (stroke) ctx.stroke();
 }
 
-function queueTile(lod, tx, tz) {
+function queueTile(lod, tx, tz, visible = false) {
   const key = tileKey(lod, tx, tz);
   if (state.tiles.has(key) || state.pendingTiles.has(key) || state.tileQueue.has(key)) return;
   const b = LODS[lod].blocks;
   const cx = tx * b + b / 2;
   const cz = tz * b + b / 2;
-  const priority = Math.hypot(cx - state.viewX, cz - state.viewZ);
-  state.tileQueue.set(key, { lod, tx, tz, priority, runId: state.runId, attempts: 0 });
+  let priority = Math.hypot(cx - state.viewX, cz - state.viewZ);
+  if (visible) priority -= VISIBLE_TILE_PRIORITY_BOOST;
+  if (lod > 0) priority -= COARSE_TILE_PRIORITY_BOOST / lod;
+  state.tileQueue.set(key, { lod, tx, tz, priority, visible, runId: state.runId, attempts: 0 });
   if (state.tileQueue.size > MAX_TILE_QUEUE) pruneTileQueue();
+  scheduleTilePump();
+}
+
+function scheduleTilePump() {
+  if (tilePumpPending) return;
+  tilePumpPending = true;
+  queueMicrotask(() => {
+    tilePumpPending = false;
+    pumpTiles();
+  });
 }
 
 function pumpTiles() {
@@ -1192,19 +1222,14 @@ async function loadTile(job) {
 function scheduleTileBuild() {
   if (tileBuildPending) return;
   tileBuildPending = true;
-  const run = deadline => buildQueuedTiles(deadline);
-  if ("requestIdleCallback" in window) {
-    requestIdleCallback(run, { timeout: 32 });
-  } else {
-    setTimeout(() => run({ timeRemaining: () => 8 }), 0);
-  }
+  requestAnimationFrame(buildQueuedTiles);
 }
 
-function buildQueuedTiles(deadline) {
+function buildQueuedTiles() {
   tileBuildPending = false;
   let processed = 0;
   let built = 0;
-  while (tileBuildQueue.length && (processed < 4 || deadline.timeRemaining() > 4)) {
+  while (tileBuildQueue.length && processed < TILE_BUILD_BATCH) {
     const job = tileBuildQueue.shift();
     processed++;
     if (job.runId === state.runId && job.grid) {
@@ -1216,6 +1241,7 @@ function buildQueuedTiles(deadline) {
   }
   updateChunkPill();
   if (processed) requestRender();
+  pumpTiles();
   if (tileBuildQueue.length) scheduleTileBuild();
 }
 
