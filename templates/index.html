@@ -1,0 +1,195 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SeedMap</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark" id="brand-icon"></div>
+      <div class="brand-text">
+        <strong>SeedMap</strong>
+        <span>Minecraft seed map</span>
+      </div>
+    </div>
+
+    <div class="seed-form">
+      <input class="field" id="seed-input" type="text" placeholder="Seed number or text">
+      <select class="select" id="version-select" title="Minecraft version">
+        <option value="1.21">Java 1.21</option>
+        <option value="1.20" selected>Java 1.20</option>
+        <option value="1.19">Java 1.19</option>
+        <option value="1.18">Java 1.18</option>
+        <option value="1.17">Java 1.17</option>
+        <option value="1.16">Java 1.16</option>
+      </select>
+      <select class="select" id="dimension-select" title="Dimension">
+        <option value="overworld" selected>Overworld</option>
+        <option value="nether">Nether</option>
+        <option value="end">End</option>
+      </select>
+      <button class="btn ghost" id="random-btn" title="Generate random seed"></button>
+      <button class="btn ghost" id="scan-btn" title="Refresh structures around current view"></button>
+      <button class="btn primary" id="explore-btn"></button>
+    </div>
+
+    <div class="top-actions">
+      <button class="btn warn" id="copy-seed-btn"></button>
+      <button class="btn ghost" id="share-url-btn" title="Copy shareable URL"></button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar">
+      <section class="section features-panel">
+        <div class="section-title">
+          <span>Features</span>
+          <span class="title-actions">
+            <button class="mini-link" id="select-all-features" type="button">Select all</button>
+            <button class="mini-link" id="deselect-all-features" type="button">Deselect all</button>
+            <span id="struct-total">0</span>
+          </span>
+        </div>
+        <div class="layer-list" id="struct-list"></div>
+      </section>
+      <section class="section map-panel">
+        <div class="section-title"><span>Map</span></div>
+        <div class="layer-list" id="layer-list"></div>
+        <div class="range-row zoom-control">
+          <span>Zoom</span>
+          <input id="zoom-range" type="range" min="0.75" max="28" step="0.25" value="4">
+        </div>
+      </section>
+      <section class="section detail-panel">
+        <div class="section-title"><span>Location</span></div>
+        <div class="selected-name" id="selected-name">
+          <span class="layer-icon" id="selected-icon"></span>
+          <span id="selected-label">Select a location</span>
+        </div>
+        <div class="coord-grid">
+          <span>X: <b id="selected-x">0</b></span>
+          <span>Z: <b id="selected-z">0</b></span>
+          <span>Chunk: <b id="selected-chunk">0, 0</b></span>
+          <span>Biome: <b id="selected-biome">-</b></span>
+        </div>
+        <div class="panel-actions">
+          <button class="btn ghost" id="copy-selected-coords"></button>
+          <button class="btn ghost" id="copy-selected-tp"></button>
+        </div>
+      </section>
+      <section class="section go-panel">
+        <div class="section-title"><span>Go</span></div>
+        <div class="go-grid">
+          <input class="number" id="goto-x" type="number" value="0" title="X coordinate" placeholder="X">
+          <input class="number" id="goto-z" type="number" value="0" title="Z coordinate" placeholder="Z">
+          <button class="btn primary" id="go-btn" title="Go to coordinates"></button>
+        </div>
+        <div class="panel-actions">
+          <button class="btn ghost" id="reset-view-btn"></button>
+          <button class="btn ghost" id="scan-current-btn"></button>
+        </div>
+      </section>
+      <section class="section seed-finder-panel">
+        <div class="section-title"><span>Seed finder</span><span id="result-count">0</span></div>
+        <div class="control-grid">
+          <div class="inline-grid">
+            <input class="number" id="search-attempts" type="number" min="1" max="250" value="80" title="Attempts">
+            <input class="number" id="search-radius" type="number" min="128" max="6000" value="2000" title="Radius">
+          </div>
+          <div class="checks" id="search-checks"></div>
+          <button class="btn primary" id="find-seeds-btn"></button>
+          <div class="result-list" id="result-list">
+            <div class="empty-results">No search results yet.</div>
+          </div>
+        </div>
+      </section>
+    </aside>
+
+    <section class="map-stage">
+      <canvas id="map-canvas"></canvas>
+
+      <div class="empty" id="empty">
+        <div class="empty-inner">
+          <div class="empty-icon" id="empty-icon"></div>
+          <h1>Enter a seed and explore</h1>
+          <p>Biomes stream in as cached chunks. Structures are pinned to exact world coordinates.</p>
+        </div>
+      </div>
+
+      <div class="floating seed-card" id="seed-card">
+        <div class="tiny-label">Active seed</div>
+        <div class="seed-line">
+          <span class="seed-mono" id="active-seed-val"></span>
+          <button class="icon-only" id="copy-active-seed" title="Copy seed"></button>
+        </div>
+      </div>
+
+      <div class="floating compass">N</div>
+
+      <div class="floating zoom-stack">
+        <button class="icon-only" id="zoom-in" title="Zoom in"></button>
+        <button class="icon-only" id="zoom-out" title="Zoom out"></button>
+      </div>
+
+      <div class="floating chunk-pill" id="chunk-pill">
+        <span class="dot-spin"></span>
+        <span id="chunk-label">Loading chunks</span>
+      </div>
+
+      <div class="floating status">
+        <span class="stat">X <b id="coord-x">0</b></span>
+        <span class="stat">Z <b id="coord-z">0</b></span>
+        <span class="divider"></span>
+        <span class="stat"><b id="zoom-label">4.0</b> blk/px</span>
+        <button class="icon-only" id="copy-cursor" title="Copy cursor coordinates"></button>
+      </div>
+
+      <div class="floating distance-note" id="distance-note">
+        <span>Zoom in to stream detailed biomes</span>
+      </div>
+
+      <div class="loader" id="loader">
+        <div class="loader-box">
+          <div class="dot-spin"></div>
+          <strong id="loader-title">Loading world</strong>
+          <span id="loader-text">Finding structures and spawn...</span>
+        </div>
+      </div>
+
+      <div class="floating tooltip" id="tooltip">
+        <strong id="tt-name"></strong>
+        <span id="tt-coords"></span>
+      </div>
+
+      <div class="floating location-popover" id="location-popover">
+        <div class="popover-head">
+          <div class="popover-title">
+            <span class="layer-icon" id="popover-icon"></span>
+            <span id="popover-label">Location</span>
+          </div>
+          <button class="icon-only" id="close-popover" title="Close"></button>
+        </div>
+        <div class="coord-grid compact">
+          <span>X/Z: <b id="popover-coords">0, 0</b></span>
+          <span>Chunk: <b id="popover-chunk">0, 0</b></span>
+          <span>Biome: <b id="popover-biome">-</b></span>
+        </div>
+        <div class="popover-actions">
+          <button class="btn ghost" id="copy-popover-coords"></button>
+          <button class="btn ghost" id="copy-popover-tp"></button>
+        </div>
+      </div>
+
+      <div class="floating toast" id="toast">Copied</div>
+    </section>
+  </main>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
+
