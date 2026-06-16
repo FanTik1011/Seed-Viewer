@@ -4,12 +4,12 @@ const WORKER_URL = "/static/seed-worker.js";
 const SAMPLE_SCALE = 8;
 const TILE_SAMPLES = TILE_BLOCKS / SAMPLE_SCALE;
 const MAX_TILE_CACHE = 520;
-const MAX_TILE_QUEUE = 220;
-const MAX_TILE_REQUESTS = 8;
+const MAX_TILE_QUEUE = 150;
+const MAX_TILE_REQUESTS = 4;
 const MAX_DRAW_TILES = 420;
 const MIN_ZOOM = 0.75;
-const MAX_ZOOM = 28;
-const DEFAULT_ZOOM = 7;
+const MAX_ZOOM = 3.2;
+const DEFAULT_ZOOM = 3.2;
 const INITIAL_SCAN_RADIUS = 6144;
 
 const ICONS = {
@@ -364,6 +364,8 @@ let workerSeq = 0;
 const workerJobs = new Map();
 let urlTimer = 0;
 let autoLoadTimer = 0;
+let tileBuildPending = false;
+const tileBuildQueue = [];
 
 function initWorker() {
   if (!("Worker" in window)) return;
@@ -928,6 +930,7 @@ async function loadTile(job) {
   updateChunkPill();
   const bx = job.tx * TILE_BLOCKS;
   const bz = job.tz * TILE_BLOCKS;
+  let queued = false;
   try {
     const data = await workerRequest("biomeTile", {
       seed: state.seed,
@@ -940,15 +943,46 @@ async function loadTile(job) {
       scale: SAMPLE_SCALE
     });
     if (job.runId !== state.runId || !data.grid) return;
-    state.tiles.set(key, createTile(data.grid, job.tx, job.tz));
-    pruneTileCache();
+    tileBuildQueue.push({ key, grid: data.grid, tx: job.tx, tz: job.tz, runId: job.runId });
+    queued = true;
+    scheduleTileBuild();
   } catch (err) {
     console.warn("Tile failed", err);
   } finally {
-    state.pendingTiles.delete(key);
-    updateChunkPill();
-    requestRender();
+    if (!queued) {
+      state.pendingTiles.delete(key);
+      updateChunkPill();
+      requestRender();
+    }
   }
+}
+
+function scheduleTileBuild() {
+  if (tileBuildPending) return;
+  tileBuildPending = true;
+  const run = deadline => buildQueuedTiles(deadline);
+  if ("requestIdleCallback" in window) {
+    requestIdleCallback(run, { timeout: 80 });
+  } else {
+    setTimeout(() => run({ timeRemaining: () => 8 }), 0);
+  }
+}
+
+function buildQueuedTiles(deadline) {
+  tileBuildPending = false;
+  let built = 0;
+  while (tileBuildQueue.length && (built < 2 || deadline.timeRemaining() > 5)) {
+    const job = tileBuildQueue.shift();
+    if (job.runId === state.runId && job.grid) {
+      state.tiles.set(job.key, createTile(job.grid, job.tx, job.tz));
+      pruneTileCache();
+      built++;
+    }
+    state.pendingTiles.delete(job.key);
+  }
+  updateChunkPill();
+  if (built) requestRender();
+  if (tileBuildQueue.length) scheduleTileBuild();
 }
 
 function createTile(grid, tx, tz) {
@@ -1228,6 +1262,7 @@ async function loadWorld(options = {}) {
   state.tiles.clear();
   state.tileQueue.clear();
   state.pendingTiles.clear();
+  tileBuildQueue.length = 0;
   state.structures = {};
   state.selected = null;
   els.empty.classList.add("hidden");
