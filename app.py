@@ -229,17 +229,11 @@ def error(msg: str, code: int = 400):
 
 def _dimension_arg() -> str:
     dimension = request.args.get("dimension", "overworld").strip().lower()
-    return dimension if dimension in DIM_IDS else "overworld"
+    return "overworld" if dimension != "overworld" else dimension
 
 
 def _available_structures(version: str, dimension: str = "overworld") -> list[str]:
     extras = _VERSION_EXTRAS.get(version, set())
-
-    if dimension == "nether":
-        return [name for name in ["Fortress", "Bastion", "Ruined_Portal_Nether"] if name in extras]
-
-    if dimension == "end":
-        return [name for name in ["End_City", "End_Gateway", "End_Island"] if name in extras]
 
     names = list(OVERWORLD_BASE_STRUCTS)
     for name in ["Ruined_Portal", "Geode", "Ancient_City", "Trail_Ruins", "Trial_Chambers"]:
@@ -367,13 +361,9 @@ def capabilities():
     return jsonify({
         "dimensions": {
             "overworld": {"biomes": True, "structures": True, "spawn": True, "strongholds": True},
-            "nether": {"biomes": HAS_DIM_BIOMES, "structures": True, "spawn": False, "strongholds": False},
-            "end": {"biomes": HAS_DIM_BIOMES, "structures": HAS_DIM_STRUCTURES, "spawn": False, "strongholds": False},
         },
         "structures": {
             "overworld": _available_structures("1.21", "overworld") + ["Stronghold", "spawn"],
-            "nether": _available_structures("1.21", "nether"),
-            "end": _available_structures("1.21", "end") if HAS_DIM_STRUCTURES else [],
         },
     })
 
@@ -474,6 +464,8 @@ def structures():
     type_id = STRUCT_TYPES.get(struct_name)
     if type_id is None:
         return error(f"Unknown structure type: {struct_name!r}. Valid: {list(STRUCT_TYPES)}")
+    if struct_name not in _available_structures(version, "overworld"):
+        return error(f"{struct_name!r} is not available in this viewer")
 
     x = _int_arg('x', -8192)
     z = _int_arg('z', -8192)
@@ -566,7 +558,7 @@ def search_seeds():
     radius = _int_arg('radius', 2000, lo=128, hi=MAX_SEARCH_RADIUS)
     limit = _int_arg('limit', 8, lo=1, hi=MAX_SEARCH_RESULTS)
 
-    available = set(_available_structures(version, "overworld") + _available_structures(version, "nether"))
+    available = set(_available_structures(version, "overworld"))
     raw_required = request.args.get('required', 'Village')
     required = [name for name in raw_required.split(',') if name in available]
     if not required:
@@ -587,8 +579,7 @@ def search_seeds():
         score = 0.0
 
         for name in required:
-            dim = "nether" if name in NETHER_STRUCTS else "overworld"
-            points = _points_for_structure(seed, mc, name, x, z, size, size, dim)
+            points = _points_for_structure(seed, mc, name, x, z, size, size, "overworld")
             if not points:
                 return None
             dist = _nearest_distance(points, spawn)

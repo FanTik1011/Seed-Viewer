@@ -142,7 +142,6 @@ const FEATURE_CATALOG = [
   { key:"Outpost", supported:true },
   { key:"Mineshaft", supported:true },
   { key:"Ruined_Portal", supported:true },
-  { key:"Ruined_Portal_Nether", supported:true },
   { key:"Jungle_Temple", supported:true },
   { key:"Desert_Temple", supported:true },
   { key:"Witch_Hut", supported:true },
@@ -159,12 +158,7 @@ const FEATURE_CATALOG = [
   { key:"Ore_Veins", label:"Ore Veins", icon:"mine", color:"#9fb6c8" },
   { key:"Desert_Well", supported:true },
   { key:"Trail_Ruins", supported:true },
-  { key:"Trial_Chambers", supported:true },
-  { key:"Fortress", supported:true },
-  { key:"Bastion", supported:true },
-  { key:"End_City", supported:true },
-  { key:"End_Gateway", supported:true },
-  { key:"End_Island", supported:true }
+  { key:"Trial_Chambers", supported:true }
 ];
 
 const MARKER_GLYPHS = {
@@ -1923,7 +1917,7 @@ function hydrateFromUrl() {
 }
 
 function parseDimension(value) {
-  return ["overworld", "nether", "end"].includes(value) ? value : "";
+  return value === "overworld" ? "overworld" : "";
 }
 
 function platformToVersion(platform) {
