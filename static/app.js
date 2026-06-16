@@ -1,14 +1,16 @@
 ﻿const API = "";
 const TILE_BLOCKS = 256;
 const WORKER_URL = "/static/seed-worker.js";
-const SAMPLE_SCALE = 4;
+const SAMPLE_SCALE = 8;
 const TILE_SAMPLES = TILE_BLOCKS / SAMPLE_SCALE;
-const MAX_TILE_CACHE = 420;
-const MAX_TILE_QUEUE = 180;
-const MAX_TILE_REQUESTS = 4;
+const MAX_TILE_CACHE = 520;
+const MAX_TILE_QUEUE = 220;
+const MAX_TILE_REQUESTS = 8;
 const MAX_DRAW_TILES = 420;
 const MIN_ZOOM = 0.75;
 const MAX_ZOOM = 28;
+const DEFAULT_ZOOM = 7;
+const INITIAL_SCAN_RADIUS = 6144;
 
 const ICONS = {
   map: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 18 3 21V6l6-3 6 3 6-3v15l-6 3-6-3Z"/><path d="M9 3v15M15 6v15"/></svg>',
@@ -269,7 +271,6 @@ const MARKER_GLYPHS = {
   ]
 };
 
-const SEARCHABLE = ["Village","Monument","Mansion","Outpost","Ancient_City","Trial_Chambers","Fortress","Bastion"];
 const VERSION_EXTRAS = {
   "1.16": new Set(["Ruined_Portal","Ruined_Portal_Nether","Fortress","Bastion","End_City","End_Gateway","End_Island"]),
   "1.17": new Set(["Ruined_Portal","Ruined_Portal_Nether","Geode","Fortress","Bastion","End_City","End_Gateway","End_Island"]),
@@ -289,6 +290,8 @@ const els = {
   seedInput: document.getElementById("seed-input"),
   version: document.getElementById("version-select"),
   dimension: document.getElementById("dimension-select"),
+  menuToggle: document.getElementById("menu-toggle"),
+  sidebar: document.querySelector(".sidebar"),
   empty: document.getElementById("empty"),
   loader: document.getElementById("loader"),
   loaderTitle: document.getElementById("loader-title"),
@@ -323,9 +326,6 @@ const els = {
   popoverCoords: document.getElementById("popover-coords"),
   popoverChunk: document.getElementById("popover-chunk"),
   popoverBiome: document.getElementById("popover-biome"),
-  searchChecks: document.getElementById("search-checks"),
-  resultList: document.getElementById("result-list"),
-  resultCount: document.getElementById("result-count"),
   shareUrlBtn: document.getElementById("share-url-btn")
 };
 
@@ -337,7 +337,7 @@ const state = {
   runId: 0,
   viewX: 0,
   viewZ: 0,
-  zoom: 4,
+  zoom: DEFAULT_ZOOM,
   width: 1,
   height: 1,
   dpr: 1,
@@ -359,11 +359,11 @@ let dragStart = null;
 let dragView = null;
 let pointerMoved = false;
 let toastTimer = 0;
-let searchAbort = null;
 let worker = null;
 let workerSeq = 0;
 const workerJobs = new Map();
 let urlTimer = 0;
+let autoLoadTimer = 0;
 
 function initWorker() {
   if (!("Worker" in window)) return;
@@ -451,7 +451,6 @@ function bootIcons() {
   document.getElementById("empty-icon").innerHTML = ICONS.map;
   setIcon("random-btn", "shuffle", "Random");
   setIcon("scan-btn", "refresh", "Scan area");
-  setIcon("explore-btn", "play", "Explore");
   setIcon("copy-seed-btn", "copy", "Copy seed");
   setIcon("copy-active-seed", "copy");
   setIcon("copy-cursor", "copy");
@@ -465,7 +464,6 @@ function bootIcons() {
   setIcon("scan-current-btn", "refresh", "Scan area");
   setIcon("go-btn", "target", "Go");
   setIcon("close-popover", "close");
-  setIcon("find-seeds-btn", "search", "Find seeds");
   setIcon("share-url-btn", "link", "Share");
 }
 
@@ -1210,39 +1208,21 @@ function makeLayerRow(iconName, label, color, count, active, onClick, options = 
   return row;
 }
 
-function buildSearchChecks() {
-  els.searchChecks.innerHTML = "";
-  const version = els.version.value;
-  const extras = VERSION_EXTRAS[version] || new Set();
-  for (const key of SEARCHABLE) {
-    const base = ["Village","Monument","Mansion","Outpost"].includes(key);
-    const available = base || extras.has(key);
-    const meta = STRUCT_META[key];
-    const label = document.createElement("label");
-    label.className = "check";
-    label.style.opacity = available ? "1" : ".45";
-    label.innerHTML = `
-      <input type="checkbox" value="${key}" ${key === "Village" ? "checked" : ""} ${available ? "" : "disabled"}>
-      <span>${meta.label}</span>
-      <span class="search-icon">${ICONS[meta.icon]}</span>
-    `;
-    label.querySelector(".search-icon").style.color = meta.color;
-    els.searchChecks.appendChild(label);
-  }
-}
-
 async function loadWorld(options = {}) {
   const seed = (options.seed || els.seedInput.value).trim();
   const version = options.version || els.version.value;
   const dimension = options.dimension || els.dimension.value || "overworld";
   if (!seed) {
-    showToast("Enter a seed first");
+    if (!options.silent) showToast("Enter a seed first");
     return;
   }
   state.runId++;
+  const runId = state.runId;
   state.seed = seed;
   state.version = version;
   state.dimension = dimension;
+  els.seedInput.value = seed;
+  els.version.value = version;
   els.dimension.value = dimension;
   state.loaded = false;
   state.tiles.clear();
@@ -1253,12 +1233,13 @@ async function loadWorld(options = {}) {
   els.empty.classList.add("hidden");
   showLoader("Loading world", `Finding ${dimension} structures...`);
   try {
-    const data = await fetchStructuresAround(0, 0, 8192);
+    const data = await fetchStructuresAround(0, 0, options.radius || INITIAL_SCAN_RADIUS);
+    if (runId !== state.runId) return;
     state.structures = data;
     state.loaded = true;
     state.viewX = Number.isFinite(options.centerX) ? Math.round(options.centerX) : (data.spawn?.x ?? 0);
     state.viewZ = Number.isFinite(options.centerZ) ? Math.round(options.centerZ) : (data.spawn?.z ?? 0);
-    state.zoom = Number.isFinite(options.zoom) ? clamp(options.zoom, MIN_ZOOM, MAX_ZOOM) : 4;
+    state.zoom = Number.isFinite(options.zoom) ? clamp(options.zoom, MIN_ZOOM, MAX_ZOOM) : DEFAULT_ZOOM;
     if (data.spawn) selectLocation({ type:"spawn", ...data.spawn, ...STRUCT_META.spawn });
     els.activeSeed.textContent = seed;
     els.seedCard.classList.add("visible");
@@ -1266,11 +1247,12 @@ async function loadWorld(options = {}) {
     scheduleUrlUpdate();
     requestRender();
   } catch (err) {
+    if (runId !== state.runId) return;
     console.error(err);
     els.empty.classList.remove("hidden");
     showToast("World load failed");
   } finally {
-    hideLoader();
+    if (runId === state.runId) hideLoader();
   }
 }
 
@@ -1281,7 +1263,7 @@ async function scanCurrentArea() {
   }
   showLoader("Scanning area", `Refreshing ${state.dimension} structures near map center...`);
   try {
-    const data = await fetchStructuresAround(state.viewX, state.viewZ, 8192);
+    const data = await fetchStructuresAround(state.viewX, state.viewZ, INITIAL_SCAN_RADIUS);
     state.structures = data;
     buildSidebar();
     scheduleUrlUpdate();
@@ -1312,75 +1294,7 @@ async function fetchStructuresAround(cx, cz, radius) {
 async function randomSeed() {
   const data = await workerRequest("randomSeed");
   els.seedInput.value = data.seed;
-}
-
-async function findSeeds() {
-  if (searchAbort) searchAbort.abort();
-  searchAbort = new AbortController();
-  const selected = [...els.searchChecks.querySelectorAll("input:checked")].map(input => input.value);
-  if (!selected.length) {
-    showToast("Pick at least one structure");
-    return;
-  }
-  const attempts = clamp(Number(document.getElementById("search-attempts").value) || 80, 1, 250);
-  const radius = clamp(Number(document.getElementById("search-radius").value) || 2000, 128, 6000);
-  const button = document.getElementById("find-seeds-btn");
-  button.disabled = true;
-  button.innerHTML = '<span class="dot-spin"></span><span>Searching</span>';
-  els.resultList.innerHTML = '<div class="empty-results">Scanning random seeds...</div>';
-  els.resultCount.textContent = "0";
-  try {
-    const data = await workerRequest("searchSeeds", {
-      version: els.version.value,
-      attempts,
-      radius,
-      limit: 8,
-      required: selected.join(",")
-    });
-    renderResults(data.results || []);
-  } catch (err) {
-    if (err.name !== "AbortError") {
-      console.error(err);
-      els.resultList.innerHTML = '<div class="empty-results">Search failed. Try fewer structures or a bigger radius.</div>';
-    }
-  } finally {
-    button.disabled = false;
-    setIcon("find-seeds-btn", "search", "Find seeds");
-  }
-}
-
-function renderResults(results) {
-  els.resultCount.textContent = results.length;
-  els.resultList.innerHTML = "";
-  if (!results.length) {
-    els.resultList.innerHTML = '<div class="empty-results">No matches. Increase attempts or radius.</div>';
-    return;
-  }
-  for (const result of results) {
-    const card = document.createElement("div");
-    card.className = "result-card";
-    const nearest = Object.entries(result.nearest || {})
-      .map(([key, dist]) => `${STRUCT_META[key]?.label || key}: ${dist} blocks`).join("<br>");
-    card.innerHTML = `
-      <div class="result-head">
-        <div class="seed-mono">${result.seed}</div>
-        <div class="mini-actions">
-          <button class="icon-only copy-result" title="Copy seed">${ICONS.copy}</button>
-          <button class="icon-only load-result" title="Load seed">${ICONS.play}</button>
-        </div>
-      </div>
-      <div class="result-meta">
-        <span>Spawn <b>X ${result.spawn.x}</b> <b>Z ${result.spawn.z}</b></span>
-        <span>${nearest}</span>
-      </div>
-    `;
-    card.querySelector(".copy-result").addEventListener("click", () => copyText(result.seed, "Seed copied"));
-    card.querySelector(".load-result").addEventListener("click", () => {
-      els.seedInput.value = result.seed;
-      loadWorld({ seed: result.seed, version: els.version.value });
-    });
-    els.resultList.appendChild(card);
-  }
+  loadWorld({ seed: data.seed, version: els.version.value, dimension: els.dimension.value });
 }
 
 function clamp(value, min, max) {
@@ -1455,6 +1369,39 @@ function shareUrl() {
     return;
   }
   copyText(buildShareUrl(), "Share URL copied");
+}
+
+function scheduleAutoLoad(delay = 650) {
+  clearTimeout(autoLoadTimer);
+  const seed = els.seedInput.value.trim();
+  if (!seed) return;
+  autoLoadTimer = setTimeout(() => {
+    const nextSeed = els.seedInput.value.trim();
+    if (!nextSeed) return;
+    const nextVersion = els.version.value;
+    const nextDimension = els.dimension.value || "overworld";
+    const sameWorld = state.loaded &&
+      state.seed === nextSeed &&
+      state.version === nextVersion &&
+      state.dimension === nextDimension;
+    if (sameWorld) return;
+    loadWorld({
+      seed: nextSeed,
+      version: nextVersion,
+      dimension: nextDimension,
+      centerX: state.loaded ? state.viewX : undefined,
+      centerZ: state.loaded ? state.viewZ : undefined,
+      zoom: state.loaded ? state.zoom : undefined,
+      silent: true
+    });
+  }, delay);
+}
+
+function toggleBottomMenu() {
+  const collapsed = !els.sidebar.classList.contains("is-collapsed");
+  els.sidebar.classList.toggle("is-collapsed", collapsed);
+  els.menuToggle.setAttribute("aria-expanded", String(!collapsed));
+  els.menuToggle.title = collapsed ? "Expand bottom menu" : "Collapse bottom menu";
 }
 
 function goToCoordinates() {
@@ -1562,8 +1509,14 @@ function bindEvents() {
     requestRender();
   }, { passive: false });
 
-  document.getElementById("explore-btn").addEventListener("click", () => loadWorld());
-  els.seedInput.addEventListener("keydown", event => { if (event.key === "Enter") loadWorld(); });
+  els.menuToggle.addEventListener("click", toggleBottomMenu);
+  els.seedInput.addEventListener("input", () => scheduleAutoLoad());
+  els.seedInput.addEventListener("keydown", event => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      scheduleAutoLoad(0);
+    }
+  });
   document.getElementById("random-btn").addEventListener("click", randomSeed);
   document.getElementById("scan-btn").addEventListener("click", scanCurrentArea);
   document.getElementById("scan-current-btn").addEventListener("click", scanCurrentArea);
@@ -1589,7 +1542,7 @@ function bindEvents() {
     if (!state.structures.spawn) return;
     state.viewX = state.structures.spawn.x;
     state.viewZ = state.structures.spawn.z;
-    state.zoom = 4;
+    state.zoom = DEFAULT_ZOOM;
     selectLocation({ type:"spawn", ...state.structures.spawn, ...STRUCT_META.spawn });
     scheduleUrlUpdate();
     requestRender();
@@ -1599,13 +1552,13 @@ function bindEvents() {
     scheduleUrlUpdate();
     requestRender();
   });
-  document.getElementById("find-seeds-btn").addEventListener("click", findSeeds);
   els.version.addEventListener("change", () => {
-    buildSearchChecks();
     if (state.loaded) loadWorld({ seed: state.seed, version: els.version.value, dimension: els.dimension.value, centerX: state.viewX, centerZ: state.viewZ, zoom: state.zoom });
+    else scheduleAutoLoad(0);
   });
   els.dimension.addEventListener("change", () => {
     if (state.loaded) loadWorld({ seed: state.seed, version: els.version.value, dimension: els.dimension.value, centerX: state.viewX, centerZ: state.viewZ, zoom: state.zoom });
+    else scheduleAutoLoad(0);
     buildSidebar();
   });
   els.shareUrlBtn.addEventListener("click", shareUrl);
@@ -1623,7 +1576,6 @@ function hydrateFromUrl() {
   const zoom = parseChunkbaseZoom(params.get("zoom"));
   if (version && [...els.version.options].some(option => option.value === version)) {
     els.version.value = version;
-    buildSearchChecks();
   }
   if (dimension) {
     els.dimension.value = dimension;
@@ -1631,16 +1583,14 @@ function hydrateFromUrl() {
   }
   if (seed) {
     els.seedInput.value = seed;
-    if (params.get("load") === "1" || platform || Number.isFinite(centerX) || Number.isFinite(centerZ)) {
-      loadWorld({
-        seed,
-        version: els.version.value,
-        dimension: els.dimension.value,
-        centerX,
-        centerZ,
-        zoom
-      });
-    }
+    loadWorld({
+      seed,
+      version: els.version.value,
+      dimension: els.dimension.value,
+      centerX,
+      centerZ,
+      zoom
+    });
   }
 }
 
@@ -1680,6 +1630,5 @@ bindEvents();
 resizeCanvas();
 loadCapabilities().finally(() => {
   buildSidebar();
-  buildSearchChecks();
   hydrateFromUrl();
 });

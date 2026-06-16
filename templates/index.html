@@ -12,8 +12,8 @@
     <div class="brand">
       <div class="brand-mark" id="brand-icon"></div>
       <div class="brand-text">
-        <strong>SeedMap</strong>
-        <span>Minecraft seed map</span>
+        <strong>Map</strong>
+        <span>Java seeds</span>
       </div>
     </div>
 
@@ -34,7 +34,6 @@
       </select>
       <button class="btn ghost" id="random-btn" title="Generate random seed"></button>
       <button class="btn ghost" id="scan-btn" title="Refresh structures around current view"></button>
-      <button class="btn primary" id="explore-btn"></button>
     </div>
 
     <div class="top-actions">
@@ -45,6 +44,9 @@
 
   <main class="layout">
     <aside class="sidebar">
+      <button class="menu-toggle" id="menu-toggle" type="button" title="Collapse bottom menu" aria-expanded="true">
+        <span></span>
+      </button>
       <section class="section features-panel">
         <div class="section-title">
           <span>Features</span>
@@ -61,7 +63,7 @@
         <div class="layer-list" id="layer-list"></div>
         <div class="range-row zoom-control">
           <span>Zoom</span>
-          <input id="zoom-range" type="range" min="0.75" max="28" step="0.25" value="4">
+          <input id="zoom-range" type="range" min="0.75" max="28" step="0.25" value="7">
         </div>
       </section>
       <section class="section detail-panel">
@@ -91,20 +93,6 @@
         <div class="panel-actions">
           <button class="btn ghost" id="reset-view-btn"></button>
           <button class="btn ghost" id="scan-current-btn"></button>
-        </div>
-      </section>
-      <section class="section seed-finder-panel">
-        <div class="section-title"><span>Seed finder</span><span id="result-count">0</span></div>
-        <div class="control-grid">
-          <div class="inline-grid">
-            <input class="number" id="search-attempts" type="number" min="1" max="250" value="80" title="Attempts">
-            <input class="number" id="search-radius" type="number" min="128" max="6000" value="2000" title="Radius">
-          </div>
-          <div class="checks" id="search-checks"></div>
-          <button class="btn primary" id="find-seeds-btn"></button>
-          <div class="result-list" id="result-list">
-            <div class="empty-results">No search results yet.</div>
-          </div>
         </div>
       </section>
     </aside>
@@ -192,4 +180,3 @@
 <script src="/static/app.js"></script>
 </body>
 </html>
-
