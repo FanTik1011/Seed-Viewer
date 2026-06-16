@@ -6,6 +6,7 @@ import sys
 import random
 import struct
 import logging
+import math
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import wraps, lru_cache
 
@@ -148,6 +149,14 @@ STRUCT_TYPES = {
 DIM_IDS = {"overworld": 0, "nether": -1, "end": 1}
 NETHER_STRUCTS = {"Fortress", "Bastion", "Ruined_Portal_Nether"}
 END_STRUCTS = {"End_City", "End_Gateway", "End_Island"}
+STRUCT_FALLBACK_CONFIG = {
+    "Trail_Ruins": {"min_version": "1.20", "salt": 83469867, "region": 34, "chunk_range": 26},
+    "Trial_Chambers": {"min_version": "1.21", "salt": 94251327, "region": 34, "chunk_range": 22},
+}
+JAVA_RAND_MULT = 0x5DEECE66D
+JAVA_RAND_ADD = 0xB
+JAVA_RAND_MASK = (1 << 48) - 1
+U64_MASK = (1 << 64) - 1
 
 # Structures available per version (using tuple comparison on version string key)
 # version string → set of unlocked extras
@@ -239,6 +248,63 @@ def _available_structures(version: str, dimension: str = "overworld") -> list[st
     return names
 
 
+def _version_at_least(version: str, minimum: str) -> bool:
+    def parts(value: str) -> tuple[int, ...]:
+        return tuple(int(p) for p in value.split("."))
+
+    current = parts(version)
+    target = parts(minimum)
+    size = max(len(current), len(target))
+    return current + (0,) * (size - len(current)) >= target + (0,) * (size - len(target))
+
+
+def _java_set_seed(value: int) -> int:
+    return (value ^ JAVA_RAND_MULT) & JAVA_RAND_MASK
+
+
+def _java_next(seed: int, bits: int) -> tuple[int, int]:
+    seed = (seed * JAVA_RAND_MULT + JAVA_RAND_ADD) & JAVA_RAND_MASK
+    return seed, seed >> (48 - bits)
+
+
+def _java_next_int(seed: int, n: int) -> tuple[int, int]:
+    m = n - 1
+    if (m & n) == 0:
+        seed, bits = _java_next(seed, 31)
+        return seed, (n * bits) >> 31
+
+    while True:
+        seed, bits = _java_next(seed, 31)
+        value = bits % n
+        if ((bits - value + m) & 0xFFFFFFFF) < 0x80000000:
+            return seed, value
+
+
+def _fallback_feature_positions(seed: int, version: str, name: str,
+                                x: int, z: int, w: int, h: int) -> list[dict]:
+    cfg = STRUCT_FALLBACK_CONFIG.get(name)
+    if not cfg or not _version_at_least(version, cfg["min_version"]):
+        return []
+
+    region = cfg["region"]
+    span = region * 16
+    rx0 = math.floor(x / span)
+    rz0 = math.floor(z / span)
+    rx1 = math.floor((x + w) / span) + 1
+    rz1 = math.floor((z + h) / span) + 1
+    world_seed = seed & U64_MASK
+    points = []
+
+    for rz in range(rz0, rz1 + 1):
+        for rx in range(rx0, rx1 + 1):
+            rng = _java_set_seed((rx * 341873128712 + rz * 132897987541 + world_seed + cfg["salt"]) & U64_MASK)
+            rng, off_x = _java_next_int(rng, cfg["chunk_range"])
+            rng, off_z = _java_next_int(rng, cfg["chunk_range"])
+            points.append({"x": (rx * region + off_x) << 4, "z": (rz * region + off_z) << 4})
+
+    return points[:MAX_STRUCTURES]
+
+
 def _points_for_structure(seed: int, mc: int, name: str, x: int, z: int, w: int, h: int, dimension: str = "overworld") -> list[dict]:
     arr = (StructPos * MAX_STRUCTURES)()
     type_id = STRUCT_TYPES[name]
@@ -251,7 +317,11 @@ def _points_for_structure(seed: int, mc: int, name: str, x: int, z: int, w: int,
         n = ctypes_call(lib.get_dim_structures, seed, mc, DIM_IDS["end"], type_id, x, z, w, h, arr, MAX_STRUCTURES)
     else:
         n = ctypes_call(lib.get_structures, seed, mc, type_id, x, z, w, h, arr, MAX_STRUCTURES)
-    return [{"x": arr[i].x, "z": arr[i].z} for i in range(n)]
+    points = [{"x": arr[i].x, "z": arr[i].z} for i in range(n)]
+    if not points and dimension == "overworld" and name in STRUCT_FALLBACK_CONFIG:
+        version = next((v for v, code in MC_VERSIONS.items() if code == mc), "1.21")
+        return _fallback_feature_positions(seed, version, name, x, z, w, h)
+    return points
 
 
 def _nearest_distance(points: list[dict], origin: dict) -> float | None:
@@ -413,20 +483,12 @@ def structures():
     mc   = MC_VERSIONS[version]
     seed = seed_to_int(seed_str)
 
-    arr = (StructPos * MAX_STRUCTURES)()
     try:
-        if struct_name in NETHER_STRUCTS or dimension == "nether":
-            n = ctypes_call(lib.get_nether_structures, seed, mc, type_id, x, z, w, h, arr, MAX_STRUCTURES)
-        elif struct_name in END_STRUCTS or dimension == "end":
-            if not HAS_DIM_STRUCTURES:
-                return error("End structures require a rebuilt libseedmap with get_dim_structures", 501)
-            n = ctypes_call(lib.get_dim_structures, seed, mc, DIM_IDS["end"], type_id, x, z, w, h, arr, MAX_STRUCTURES)
-        else:
-            n = ctypes_call(lib.get_structures, seed, mc, type_id, x, z, w, h, arr, MAX_STRUCTURES)
+        points = _points_for_structure(seed, mc, struct_name, x, z, w, h, dimension)
     except RuntimeError as e:
         return error(str(e), 500)
 
-    return jsonify([{"x": arr[i].x, "z": arr[i].z} for i in range(n)])
+    return jsonify(points)
 
 
 @app.route('/api/all_structures')
