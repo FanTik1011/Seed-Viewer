@@ -7,7 +7,7 @@ import random
 import struct
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from functools import wraps
+from functools import wraps, lru_cache
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -261,6 +261,26 @@ def _nearest_distance(points: list[dict], origin: dict) -> float | None:
     return min(((p["x"] - ox) ** 2 + (p["z"] - oz) ** 2) ** 0.5 for p in points)
 
 
+@lru_cache(maxsize=4096)
+def _biome_grid_cached(seed: int, mc: int, dim_id: int,
+                       x: int, z: int, w: int, h: int, scale: int) -> tuple:
+    """
+    Biome generation is fully deterministic for a given seed/version/region,
+    so the result is memoised. The native call releases the GIL, so with a
+    threaded server several misses can compute in parallel; repeat views are
+    served straight from this cache.
+    """
+    if dim_id == 0:
+        ptr = ctypes_call(lib.get_biome_grid, seed, mc, x, z, w, h, scale)
+    else:
+        ptr = ctypes_call(lib.get_biome_grid_dim, seed, mc, dim_id, x, z, w, h, scale)
+    if not ptr:
+        raise RuntimeError("Biome generation failed")
+    grid = tuple(ptr[i] for i in range(w * h))
+    lib.free_array(ptr)
+    return grid
+
+
 # ─── Routes ────────────────────────────────────────────────────────────────────
 @app.route('/')
 def index():
@@ -317,24 +337,18 @@ def biomes():
     seed = seed_to_int(seed_str)
 
     try:
-        if dimension == "overworld":
-            ptr = ctypes_call(lib.get_biome_grid, seed, mc, x, z, w, h, scale)
-        else:
-            ptr = ctypes_call(lib.get_biome_grid_dim, seed, mc, DIM_IDS[dimension], x, z, w, h, scale)
+        grid = list(_biome_grid_cached(seed, mc, DIM_IDS[dimension], x, z, w, h, scale))
     except RuntimeError as e:
         return error(str(e), 500)
 
-    if not ptr:
-        return error("Biome generation failed", 500)
-
-    grid = [ptr[i] for i in range(w * h)]
-    lib.free_array(ptr)
-
-    return jsonify({
+    resp = jsonify({
         "seed": seed_str, "version": version, "dimension": dimension,
         "x": x, "z": z, "w": w, "h": h, "scale": scale,
         "grid": grid,
     })
+    # Deterministic for these exact params → safe to cache hard in the browser.
+    resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    return resp
 
 
 @app.route('/api/spawn')
@@ -471,7 +485,9 @@ def all_structures():
                 except Exception as exc:
                     log.error("Structure fetch failed: %s", exc, exc_info=True)
 
-    return jsonify(response)
+    resp = jsonify(response)
+    resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    return resp
 
 
 @app.route('/api/search_seeds')
@@ -566,4 +582,4 @@ if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     debug = os.environ.get("FLASK_DEBUG", "0") == "1"
     log.info("Starting SeedMap on port %d (debug=%s)", port, debug)
-    app.run(debug=debug, host='0.0.0.0', port=port)
+    app.run(debug=debug, host='0.0.0.0', port=port, threaded=True)

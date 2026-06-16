@@ -3,13 +3,34 @@ const TILE_BLOCKS = 256;
 const WORKER_URL = "/static/seed-worker.js";
 const SAMPLE_SCALE = 8;
 const TILE_SAMPLES = TILE_BLOCKS / SAMPLE_SCALE;
-const MAX_TILE_CACHE = 520;
-const MAX_TILE_QUEUE = 150;
-const MAX_TILE_REQUESTS = 4;
+const MAX_TILE_CACHE = 1200;
+const MAX_TILE_QUEUE = 360;
+// Concurrent in-flight tile fetches. Spread across a pool of workers so fetch +
+// JSON parsing of biome grids happens in parallel instead of on one thread.
+const MAX_TILE_REQUESTS = 16;
 const MAX_DRAW_TILES = 420;
-const MIN_ZOOM = 0.75;
+const TILE_REQUEST_TIMEOUT = 9000;
+const MAX_TILE_ATTEMPTS = 3;
+const TILE_RETRY_PENALTY = 4000;
+const PREFETCH_MARGIN = 2;
+// Number of seed-worker threads. Each one can hold several fetches open and
+// parse responses independently, so the visible viewport fills much faster.
+const WORKER_POOL_SIZE = Math.max(2, Math.min(8, (navigator.hardwareConcurrency || 4)));
+
+
+const LODS = [
+  { blocks: 256,   samples: 32,  scale: 8  },
+  { blocks: 1024,  samples: 32,  scale: 32 },
+  { blocks: 4096,  samples: 64,  scale: 64 },
+  { blocks: 16384, samples: 256, scale: 64 }
+];
+const MIN_ZOOM = 0.5;
+// Hard cap on zoom-out: you can never see coarser than 3.2 blocks per pixel.
+// This is also the default, so the world opens at its most zoomed-out state.
 const MAX_ZOOM = 3.2;
 const DEFAULT_ZOOM = 3.2;
+const ZOOM_EASE = 0.25;
+const PAN_FRICTION = 0.9;
 const INITIAL_SCAN_RADIUS = 6144;
 
 const ICONS = {
@@ -338,6 +359,8 @@ const state = {
   viewX: 0,
   viewZ: 0,
   zoom: DEFAULT_ZOOM,
+  zoomTarget: DEFAULT_ZOOM,
+  zoomAnchor: null,
   width: 1,
   height: 1,
   dpr: 1,
@@ -347,7 +370,7 @@ const state = {
   structures: {},
   showBiomes: true,
   showGrid: true,
-  showAxes: true,
+  showAxes: false,
   cursor: { x: 0, z: 0 },
   selected: null,
   capabilities: null,
@@ -355,11 +378,17 @@ const state = {
 };
 
 let raf = 0;
+let zoomRaf = 0;
+let momentumRaf = 0;
+let panSample = null;
+let panVel = { x: 0, z: 0 };
+let lastMoveT = 0;
 let dragStart = null;
 let dragView = null;
 let pointerMoved = false;
 let toastTimer = 0;
-let worker = null;
+let workerPool = [];
+let workerCursor = 0;
 let workerSeq = 0;
 const workerJobs = new Map();
 let urlTimer = 0;
@@ -367,33 +396,46 @@ let autoLoadTimer = 0;
 let tileBuildPending = false;
 const tileBuildQueue = [];
 
+// A small pool of identical workers. Tile work (fetch + JSON.parse of the biome
+// grid) is spread round-robin across them, so several chunks resolve at once
+// instead of queueing behind a single thread. Each job remembers its worker so
+// a per-worker crash only rejects that worker's jobs.
 function initWorker() {
   if (!("Worker" in window)) return;
-  worker = new Worker(WORKER_URL);
-  worker.addEventListener("message", event => {
-    const { id, ok, data, error } = event.data || {};
-    const job = workerJobs.get(id);
-    if (!job) return;
-    workerJobs.delete(id);
-    if (ok) {
-      job.resolve(data);
-    } else {
-      job.reject(new Error(error || "Worker task failed"));
-    }
-  });
-  worker.addEventListener("error", event => {
-    for (const job of workerJobs.values()) job.reject(new Error(event.message || "Worker failed"));
-    workerJobs.clear();
-    worker = null;
-  });
+  workerPool = [];
+  for (let i = 0; i < WORKER_POOL_SIZE; i++) {
+    const w = new Worker(WORKER_URL);
+    w.addEventListener("message", event => {
+      const { id, ok, data, error } = event.data || {};
+      const job = workerJobs.get(id);
+      if (!job) return;
+      workerJobs.delete(id);
+      if (ok) {
+        job.resolve(data);
+      } else {
+        job.reject(new Error(error || "Worker task failed"));
+      }
+    });
+    w.addEventListener("error", event => {
+      for (const [id, job] of workerJobs) {
+        if (job.worker === w) {
+          job.reject(new Error(event.message || "Worker failed"));
+          workerJobs.delete(id);
+        }
+      }
+    });
+    workerPool.push(w);
+  }
 }
 
 function workerRequest(type, payload = {}) {
-  if (!worker) return directRequest(type, payload);
+  if (!workerPool.length) return directRequest(type, payload);
+  const w = workerPool[workerCursor];
+  workerCursor = (workerCursor + 1) % workerPool.length;
   const id = ++workerSeq;
   return new Promise((resolve, reject) => {
-    workerJobs.set(id, { resolve, reject });
-    worker.postMessage({ id, type, payload });
+    workerJobs.set(id, { resolve, reject, worker: w });
+    w.postMessage({ id, type, payload });
   });
 }
 
@@ -493,8 +535,8 @@ function screenToWorld(sx, sy) {
   };
 }
 
-function tileKey(tx, tz) {
-  return `${tx},${tz}`;
+function tileKey(lod, tx, tz) {
+  return `${lod}:${tx},${tz}`;
 }
 
 function dimensionCaps(dimension = state.dimension) {
@@ -526,6 +568,85 @@ function requestRender() {
   raf = requestAnimationFrame(render);
 }
 
+function cancelMomentum() {
+  if (momentumRaf) {
+    cancelAnimationFrame(momentumRaf);
+    momentumRaf = 0;
+  }
+}
+
+function cancelZoomAnim() {
+  if (zoomRaf) {
+    cancelAnimationFrame(zoomRaf);
+    zoomRaf = 0;
+  }
+}
+
+// Ease state.zoom toward state.zoomTarget while keeping the anchor world-point
+// pinned under its screen position — a smooth, cursor-anchored zoom.
+function startZoomTo(target, sx = state.width / 2, sy = state.height / 2) {
+  if (!state.loaded) return;
+  cancelMomentum();
+  const before = screenToWorld(sx, sy);
+  state.zoomTarget = clamp(target, MIN_ZOOM, MAX_ZOOM);
+  state.zoomAnchor = { sx, sy, wx: before.x, wz: before.z };
+  if (!zoomRaf) zoomRaf = requestAnimationFrame(animateZoom);
+}
+
+function animateZoom() {
+  const t = state.zoomTarget;
+  const diff = t - state.zoom;
+  if (Math.abs(diff) <= Math.max(0.0008, t * 0.004)) {
+    state.zoom = t;
+    zoomRaf = 0;
+  } else {
+    state.zoom += diff * ZOOM_EASE;
+    zoomRaf = requestAnimationFrame(animateZoom);
+  }
+  const a = state.zoomAnchor;
+  if (a) {
+    state.viewX = a.wx - (a.sx - state.width / 2) * state.zoom;
+    state.viewZ = a.wz - (a.sy - state.height / 2) * state.zoom;
+  }
+  scheduleUrlUpdate();
+  requestRender();
+}
+
+// Glide the view after a flick, with frame-rate-independent friction.
+function startMomentum(vx, vz) {
+  cancelMomentum();
+  if (Math.hypot(vx, vz) < 0.015) return;
+  let last = performance.now();
+  const step = ts => {
+    const dt = Math.min(40, ts - last);
+    last = ts;
+    state.viewX += vx * dt;
+    state.viewZ += vz * dt;
+    const f = Math.pow(PAN_FRICTION, dt / 16.67);
+    vx *= f;
+    vz *= f;
+    scheduleUrlUpdate();
+    requestRender();
+    momentumRaf = Math.hypot(vx, vz) > 0.01 ? requestAnimationFrame(step) : 0;
+  };
+  momentumRaf = requestAnimationFrame(step);
+}
+
+function zoomToSlider(z) {
+  return Math.log(z / MIN_ZOOM) / Math.log(MAX_ZOOM / MIN_ZOOM);
+}
+
+function sliderToZoom(t) {
+  return MIN_ZOOM * Math.pow(MAX_ZOOM / MIN_ZOOM, clamp(t, 0, 1));
+}
+
+// Set zoom instantly (slider, programmatic jumps) and keep the animator in sync.
+function setZoomImmediate(z) {
+  cancelZoomAnim();
+  state.zoom = clamp(z, MIN_ZOOM, MAX_ZOOM);
+  state.zoomTarget = state.zoom;
+}
+
 function visibleTileRange() {
   const tl = screenToWorld(0, 0);
   const br = screenToWorld(state.width, state.height);
@@ -540,6 +661,36 @@ function visibleTileRange() {
   return range;
 }
 
+// Choose the finest LOD whose tiles still cover the viewport within the draw
+// budget. Coarser tiers keep the on-screen tile count low when zoomed far out.
+function pickLod() {
+  const wWorld = state.width * state.zoom;
+  const hWorld = state.height * state.zoom;
+  for (let i = 0; i < LODS.length - 1; i++) {
+    const b = LODS[i].blocks;
+    const count = (Math.ceil(wWorld / b) + 3) * (Math.ceil(hWorld / b) + 3);
+    if (count <= MAX_DRAW_TILES) return i;
+  }
+  return LODS.length - 1;
+}
+
+function biomeTileRange(lod) {
+  const b = LODS[lod].blocks;
+  const tl = screenToWorld(0, 0);
+  const br = screenToWorld(state.width, state.height);
+  const range = {
+    lod,
+    blocks: b,
+    txMin: Math.floor(tl.x / b) - 1,
+    txMax: Math.floor(br.x / b) + 1,
+    tzMin: Math.floor(tl.z / b) - 1,
+    tzMax: Math.floor(br.z / b) + 1
+  };
+  range.count = (range.txMax - range.txMin + 1) * (range.tzMax - range.tzMin + 1);
+  range.tilePx = b / state.zoom;
+  return range;
+}
+
 function render() {
   raf = 0;
   ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
@@ -548,8 +699,10 @@ function render() {
   ctx.fillRect(0, 0, state.width, state.height);
   if (!state.loaded) return;
 
-  const range = visibleTileRange();
+  const gridRange = visibleTileRange();
   const canStreamBiomes = dimensionCaps().biomes;
+  const lod = pickLod();
+  const range = biomeTileRange(lod);
   const detailedBiomes = canStreamBiomes && state.showBiomes && range.count <= MAX_DRAW_TILES && range.tilePx >= 10;
   els.distanceNote.classList.toggle("visible", state.showBiomes && !detailedBiomes);
   els.distanceNote.querySelector("span").textContent = canStreamBiomes
@@ -558,10 +711,11 @@ function render() {
   trimTileQueueToView(range);
   if (detailedBiomes) {
     drawBiomes(range);
+    prefetchAround(range);
   } else {
     drawDistantMap();
   }
-  if (state.showGrid && range.tilePx >= 12) drawGrid(range);
+  if (state.showGrid && gridRange.tilePx >= 12) drawGrid(gridRange);
   if (state.showAxes) drawAxes();
   drawSelection();
   drawStructures();
@@ -571,21 +725,59 @@ function render() {
   pumpTiles();
 }
 
+function prefetchAround(range) {
+  // Warm a ring just outside the viewport so a pan reveals ready tiles.
+  // queueTile prioritises by distance to view centre, so these naturally
+  // load after everything currently on screen.
+  if (!state.showBiomes || !dimensionCaps().biomes) return;
+  for (let tz = range.tzMin - PREFETCH_MARGIN; tz <= range.tzMax + PREFETCH_MARGIN; tz++) {
+    for (let tx = range.txMin - PREFETCH_MARGIN; tx <= range.txMax + PREFETCH_MARGIN; tx++) {
+      if (tx >= range.txMin && tx <= range.txMax && tz >= range.tzMin && tz <= range.tzMax) continue;
+      queueTile(range.lod, tx, tz);
+    }
+  }
+}
+
+// While a tile loads, borrow pixels from an already-cached coarser tile so the
+// map refines progressively instead of flashing a checkerboard.
+function drawFallbackTile(fineLod, tx, tz, pos, tilePx) {
+  const fine = LODS[fineLod];
+  const wx = tx * fine.blocks;
+  const wz = tz * fine.blocks;
+  for (let lod = fineLod + 1; lod < LODS.length; lod++) {
+    const c = LODS[lod];
+    const ctx2 = Math.floor(wx / c.blocks);
+    const ctz = Math.floor(wz / c.blocks);
+    const tile = state.tiles.get(tileKey(lod, ctx2, ctz));
+    if (!tile) continue;
+    const sx = (wx - ctx2 * c.blocks) / c.scale;
+    const sy = (wz - ctz * c.blocks) / c.scale;
+    const sSize = fine.blocks / c.scale;
+    ctx.drawImage(tile.canvas, sx, sy, sSize, sSize, pos.x, pos.y, tilePx + 1, tilePx + 1);
+    tile.last = performance.now();
+    return true;
+  }
+  return false;
+}
+
 function drawBiomes(range) {
-  const tilePx = TILE_BLOCKS / state.zoom;
+  const cfg = LODS[range.lod];
+  const tilePx = cfg.blocks / state.zoom;
   for (let tz = range.tzMin; tz <= range.tzMax; tz++) {
     for (let tx = range.txMin; tx <= range.txMax; tx++) {
-      const key = tileKey(tx, tz);
-      const pos = worldToScreen(tx * TILE_BLOCKS, tz * TILE_BLOCKS);
+      const key = tileKey(range.lod, tx, tz);
+      const pos = worldToScreen(tx * cfg.blocks, tz * cfg.blocks);
       const tile = state.tiles.get(key);
       if (state.showBiomes && tile) {
         tile.last = performance.now();
         ctx.drawImage(tile.canvas, pos.x, pos.y, tilePx + 1, tilePx + 1);
+      } else if (state.showBiomes && drawFallbackTile(range.lod, tx, tz, pos, tilePx)) {
+        // refined-in-place from a coarser tile
       } else {
         ctx.fillStyle = ((tx + tz) & 1) ? "#101411" : "#0d110f";
         ctx.fillRect(pos.x, pos.y, tilePx + 1, tilePx + 1);
       }
-      if (state.showBiomes && !tile) queueTile(tx, tz);
+      if (state.showBiomes && !tile) queueTile(range.lod, tx, tz);
     }
   }
 }
@@ -881,13 +1073,14 @@ function roundRect(x, y, w, h, r, fill, stroke) {
   if (stroke) ctx.stroke();
 }
 
-function queueTile(tx, tz) {
-  const key = tileKey(tx, tz);
+function queueTile(lod, tx, tz) {
+  const key = tileKey(lod, tx, tz);
   if (state.tiles.has(key) || state.pendingTiles.has(key) || state.tileQueue.has(key)) return;
-  const cx = tx * TILE_BLOCKS + TILE_BLOCKS / 2;
-  const cz = tz * TILE_BLOCKS + TILE_BLOCKS / 2;
+  const b = LODS[lod].blocks;
+  const cx = tx * b + b / 2;
+  const cz = tz * b + b / 2;
   const priority = Math.hypot(cx - state.viewX, cz - state.viewZ);
-  state.tileQueue.set(key, { tx, tz, priority, runId: state.runId });
+  state.tileQueue.set(key, { lod, tx, tz, priority, runId: state.runId, attempts: 0 });
   if (state.tileQueue.size > MAX_TILE_QUEUE) pruneTileQueue();
 }
 
@@ -898,9 +1091,12 @@ function pumpTiles() {
     updateChunkPill();
     return;
   }
-  while (state.pendingTiles.size < MAX_TILE_REQUESTS && state.tileQueue.size) {
-    const next = [...state.tileQueue.values()].sort((a, b) => a.priority - b.priority)[0];
-    state.tileQueue.delete(tileKey(next.tx, next.tz));
+  if (state.pendingTiles.size >= MAX_TILE_REQUESTS || !state.tileQueue.size) return;
+  const sorted = [...state.tileQueue.values()].sort((a, b) => a.priority - b.priority);
+  let i = 0;
+  while (state.pendingTiles.size < MAX_TILE_REQUESTS && i < sorted.length) {
+    const next = sorted[i++];
+    state.tileQueue.delete(tileKey(next.lod, next.tx, next.tz));
     loadTile(next);
   }
 }
@@ -916,41 +1112,77 @@ function trimTileQueueToView(range) {
   if (!state.tileQueue.size) return;
   const margin = 3;
   for (const [key, job] of state.tileQueue) {
-    const offscreen = job.tx < range.txMin - margin || job.tx > range.txMax + margin ||
+    const offscreen = job.lod !== range.lod ||
+      job.tx < range.txMin - margin || job.tx > range.txMax + margin ||
       job.tz < range.tzMin - margin || job.tz > range.tzMax + margin ||
       job.runId !== state.runId;
     if (offscreen) state.tileQueue.delete(key);
   }
 }
 
+function withTimeout(promise, ms, message = "Request timed out") {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    promise.then(
+      value => { clearTimeout(timer); resolve(value); },
+      err => { clearTimeout(timer); reject(err); }
+    );
+  });
+}
+
+function requeueTile(job) {
+  const key = tileKey(job.lod, job.tx, job.tz);
+  if (state.tiles.has(key) || state.pendingTiles.has(key) || state.tileQueue.has(key)) return;
+  const attempts = (job.attempts || 0) + 1;
+  const b = LODS[job.lod].blocks;
+  const cx = job.tx * b + b / 2;
+  const cz = job.tz * b + b / 2;
+  const priority = Math.hypot(cx - state.viewX, cz - state.viewZ) + attempts * TILE_RETRY_PENALTY;
+  state.tileQueue.set(key, { lod: job.lod, tx: job.tx, tz: job.tz, priority, runId: job.runId, attempts });
+  if (state.tileQueue.size > MAX_TILE_QUEUE) pruneTileQueue();
+}
+
 async function loadTile(job) {
-  const key = tileKey(job.tx, job.tz);
+  const cfg = LODS[job.lod];
+  const key = tileKey(job.lod, job.tx, job.tz);
   if (!dimensionCaps().biomes) return;
   state.pendingTiles.add(key);
   updateChunkPill();
-  const bx = job.tx * TILE_BLOCKS;
-  const bz = job.tz * TILE_BLOCKS;
+  const bx = job.tx * cfg.blocks;
+  const bz = job.tz * cfg.blocks;
   let queued = false;
+  let retry = false;
   try {
-    const data = await workerRequest("biomeTile", {
-      seed: state.seed,
-      version: state.version,
-      dimension: state.dimension,
-      x: bx,
-      z: bz,
-      w: TILE_SAMPLES,
-      h: TILE_SAMPLES,
-      scale: SAMPLE_SCALE
-    });
+    const data = await withTimeout(
+      workerRequest("biomeTile", {
+        seed: state.seed,
+        version: state.version,
+        dimension: state.dimension,
+        x: bx,
+        z: bz,
+        w: cfg.samples,
+        h: cfg.samples,
+        scale: cfg.scale
+      }),
+      TILE_REQUEST_TIMEOUT,
+      "Tile request timed out"
+    );
     if (job.runId !== state.runId || !data.grid) return;
-    tileBuildQueue.push({ key, grid: data.grid, tx: job.tx, tz: job.tz, runId: job.runId });
+    tileBuildQueue.push({ key, grid: data.grid, lod: job.lod, tx: job.tx, tz: job.tz, runId: job.runId });
     queued = true;
     scheduleTileBuild();
   } catch (err) {
-    console.warn("Tile failed", err);
+    // A blip shouldn't leave a permanent hole: retry a couple of times,
+    // de-prioritised, as long as the tile is still in the current world.
+    if (job.runId === state.runId && (job.attempts || 0) + 1 < MAX_TILE_ATTEMPTS) {
+      retry = true;
+    } else {
+      console.warn("Tile failed", err);
+    }
   } finally {
     if (!queued) {
       state.pendingTiles.delete(key);
+      if (retry) requeueTile(job);
       updateChunkPill();
       requestRender();
     }
@@ -962,7 +1194,7 @@ function scheduleTileBuild() {
   tileBuildPending = true;
   const run = deadline => buildQueuedTiles(deadline);
   if ("requestIdleCallback" in window) {
-    requestIdleCallback(run, { timeout: 80 });
+    requestIdleCallback(run, { timeout: 32 });
   } else {
     setTimeout(() => run({ timeRemaining: () => 8 }), 0);
   }
@@ -970,31 +1202,37 @@ function scheduleTileBuild() {
 
 function buildQueuedTiles(deadline) {
   tileBuildPending = false;
+  let processed = 0;
   let built = 0;
-  while (tileBuildQueue.length && (built < 2 || deadline.timeRemaining() > 5)) {
+  while (tileBuildQueue.length && (processed < 4 || deadline.timeRemaining() > 4)) {
     const job = tileBuildQueue.shift();
+    processed++;
     if (job.runId === state.runId && job.grid) {
-      state.tiles.set(job.key, createTile(job.grid, job.tx, job.tz));
+      state.tiles.set(job.key, createTile(job.grid, job.lod, job.tx, job.tz));
       pruneTileCache();
       built++;
     }
     state.pendingTiles.delete(job.key);
   }
   updateChunkPill();
-  if (built) requestRender();
+  if (processed) requestRender();
   if (tileBuildQueue.length) scheduleTileBuild();
 }
 
-function createTile(grid, tx, tz) {
+function createTile(grid, lod, tx, tz) {
+  const cfg = LODS[lod];
+  const s = cfg.samples;
   const cnv = document.createElement("canvas");
-  cnv.width = TILE_SAMPLES;
-  cnv.height = TILE_SAMPLES;
+  cnv.width = s;
+  cnv.height = s;
   const c = cnv.getContext("2d", { alpha: false });
-  const img = c.createImageData(TILE_SAMPLES, TILE_SAMPLES);
+  const img = c.createImageData(s, s);
   for (let i = 0; i < grid.length; i++) {
-    const lx = i % TILE_SAMPLES;
-    const lz = Math.floor(i / TILE_SAMPLES);
-    const rgb = tintBiome(hexToRgb(BIOME_COLORS[grid[i]] || "#252a27"), tx * TILE_SAMPLES + lx, tz * TILE_SAMPLES + lz, grid[i]);
+    const lx = i % s;
+    const lz = Math.floor(i / s);
+    const worldX = tx * cfg.blocks + lx * cfg.scale;
+    const worldZ = tz * cfg.blocks + lz * cfg.scale;
+    const rgb = tintBiome(hexToRgb(BIOME_COLORS[grid[i]] || "#252a27"), worldX >> 4, worldZ >> 4, grid[i]);
     const j = i * 4;
     img.data[j] = rgb[0];
     img.data[j + 1] = rgb[1];
@@ -1002,7 +1240,7 @@ function createTile(grid, tx, tz) {
     img.data[j + 3] = 255;
   }
   c.putImageData(img, 0, 0);
-  return { canvas: cnv, grid, last: performance.now() };
+  return { canvas: cnv, grid, lod, samples: s, scale: cfg.scale, blocks: cfg.blocks, last: performance.now() };
 }
 
 function tintBiome(rgb, x, z, biomeId) {
@@ -1074,7 +1312,7 @@ function updateHud() {
   els.coordZ.textContent = state.cursor.z;
   els.zoomLabel.textContent = state.zoom.toFixed(state.zoom < 10 ? 1 : 0);
   if (els.zoomRange && document.activeElement !== els.zoomRange) {
-    els.zoomRange.value = String(state.zoom);
+    els.zoomRange.value = String(zoomToSlider(state.zoom));
   }
 }
 
@@ -1086,14 +1324,18 @@ function updateChunkPill() {
 
 function biomeAt(wx, wz) {
   if (!dimensionCaps().biomes) return state.dimension === "nether" ? "Nether preview" : state.dimension === "end" ? "End preview" : "Biome unavailable";
-  const tx = Math.floor(wx / TILE_BLOCKS);
-  const tz = Math.floor(wz / TILE_BLOCKS);
-  const tile = state.tiles.get(tileKey(tx, tz));
-  if (!tile) return "Biome loading";
-  const localX = Math.floor((wx - tx * TILE_BLOCKS) / SAMPLE_SCALE);
-  const localZ = Math.floor((wz - tz * TILE_BLOCKS) / SAMPLE_SCALE);
-  const id = tile.grid[localZ * TILE_SAMPLES + localX];
-  return BIOME_NAMES[id] || `Biome ${id}`;
+  for (let lod = 0; lod < LODS.length; lod++) {
+    const cfg = LODS[lod];
+    const tx = Math.floor(wx / cfg.blocks);
+    const tz = Math.floor(wz / cfg.blocks);
+    const tile = state.tiles.get(tileKey(lod, tx, tz));
+    if (!tile) continue;
+    const localX = Math.floor((wx - tx * cfg.blocks) / cfg.scale);
+    const localZ = Math.floor((wz - tz * cfg.blocks) / cfg.scale);
+    const id = tile.grid[localZ * cfg.samples + localX];
+    return BIOME_NAMES[id] || `Biome ${id}`;
+  }
+  return "Biome loading";
 }
 
 function selectLocation(location, screenPoint = null) {
@@ -1179,11 +1421,6 @@ function buildSidebar() {
     }),
     makeLayerRow("target", "Grid Lines", "#5cc8f2", null, state.showGrid, () => {
       state.showGrid = !state.showGrid;
-      buildSidebar();
-      requestRender();
-    }),
-    makeLayerRow("plus", "World Axes", "#f2b84b", null, state.showAxes, () => {
-      state.showAxes = !state.showAxes;
       buildSidebar();
       requestRender();
     })
@@ -1275,6 +1512,9 @@ async function loadWorld(options = {}) {
     state.viewX = Number.isFinite(options.centerX) ? Math.round(options.centerX) : (data.spawn?.x ?? 0);
     state.viewZ = Number.isFinite(options.centerZ) ? Math.round(options.centerZ) : (data.spawn?.z ?? 0);
     state.zoom = Number.isFinite(options.zoom) ? clamp(options.zoom, MIN_ZOOM, MAX_ZOOM) : DEFAULT_ZOOM;
+    state.zoomTarget = state.zoom;
+    cancelZoomAnim();
+    cancelMomentum();
     if (data.spawn) selectLocation({ type:"spawn", ...data.spawn, ...STRUCT_META.spawn });
     els.activeSeed.textContent = seed;
     els.seedCard.classList.add("visible");
@@ -1446,6 +1686,8 @@ function goToCoordinates() {
     showToast("Enter valid X and Z");
     return;
   }
+  cancelMomentum();
+  cancelZoomAnim();
   state.viewX = Math.round(x);
   state.viewZ = Math.round(z);
   if (state.loaded) {
@@ -1483,6 +1725,18 @@ function handlePointerMove(event) {
     if (Math.hypot(event.clientX - dragStart.x, event.clientY - dragStart.y) > 3) pointerMoved = true;
     state.viewX = dragView.x - (event.clientX - dragStart.x) * state.zoom;
     state.viewZ = dragView.z - (event.clientY - dragStart.y) * state.zoom;
+    const now = performance.now();
+    if (panSample) {
+      const dt = now - panSample.t;
+      if (dt > 0) {
+        const nvx = (state.viewX - panSample.x) / dt;
+        const nvz = (state.viewZ - panSample.z) / dt;
+        panVel.x = panVel.x * 0.5 + nvx * 0.5;
+        panVel.z = panVel.z * 0.5 + nvz * 0.5;
+      }
+    }
+    panSample = { x: state.viewX, z: state.viewZ, t: now };
+    lastMoveT = now;
     requestRender();
   }
 
@@ -1507,16 +1761,25 @@ function bindEvents() {
   window.addEventListener("resize", resizeCanvas);
   canvas.addEventListener("pointerdown", event => {
     if (!state.loaded) return;
+    cancelMomentum();
+    cancelZoomAnim();
     dragStart = { x: event.clientX, y: event.clientY };
     dragView = { x: state.viewX, z: state.viewZ };
     pointerMoved = false;
+    panSample = { x: state.viewX, z: state.viewZ, t: performance.now() };
+    panVel = { x: 0, z: 0 };
     canvas.setPointerCapture(event.pointerId);
     canvas.classList.add("dragging");
   });
   canvas.addEventListener("pointerup", event => {
     if (!pointerMoved) selectLocationAt(event);
-    if (pointerMoved) scheduleUrlUpdate();
+    if (pointerMoved) {
+      scheduleUrlUpdate();
+      // Only glide if the pointer was still moving at release.
+      if (performance.now() - lastMoveT < 70) startMomentum(panVel.x, panVel.z);
+    }
     dragStart = null;
+    panSample = null;
     canvas.releasePointerCapture(event.pointerId);
     canvas.classList.remove("dragging");
   });
@@ -1535,13 +1798,13 @@ function bindEvents() {
     const rect = canvas.getBoundingClientRect();
     const sx = event.clientX - rect.left;
     const sy = event.clientY - rect.top;
-    const before = screenToWorld(sx, sy);
-    const factor = event.deltaY > 0 ? 1.22 : 0.82;
-    state.zoom = clamp(state.zoom * factor, MIN_ZOOM, MAX_ZOOM);
-    state.viewX = before.x - (sx - state.width / 2) * state.zoom;
-    state.viewZ = before.z - (sy - state.height / 2) * state.zoom;
-    scheduleUrlUpdate();
-    requestRender();
+    // Exponential step keeps mouse notches and trackpad swipes feeling continuous.
+    const mag = Math.min(Math.abs(event.deltaY), 120);
+    const stepBase = event.ctrlKey ? 0.012 : 0.0045;
+    const step = Math.exp(stepBase * mag);
+    const base = state.zoomTarget || state.zoom;
+    const factor = event.deltaY > 0 ? step : 1 / step;
+    startZoomTo(base * factor, sx, sy);
   }, { passive: false });
 
   els.menuToggle.addEventListener("click", toggleBottomMenu);
@@ -1555,8 +1818,8 @@ function bindEvents() {
   document.getElementById("random-btn").addEventListener("click", randomSeed);
   document.getElementById("scan-btn").addEventListener("click", scanCurrentArea);
   document.getElementById("scan-current-btn").addEventListener("click", scanCurrentArea);
-  document.getElementById("zoom-in").addEventListener("click", () => { state.zoom = clamp(state.zoom * .72, MIN_ZOOM, MAX_ZOOM); scheduleUrlUpdate(); requestRender(); });
-  document.getElementById("zoom-out").addEventListener("click", () => { state.zoom = clamp(state.zoom * 1.38, MIN_ZOOM, MAX_ZOOM); scheduleUrlUpdate(); requestRender(); });
+  document.getElementById("zoom-in").addEventListener("click", () => startZoomTo((state.zoomTarget || state.zoom) * .6));
+  document.getElementById("zoom-out").addEventListener("click", () => startZoomTo((state.zoomTarget || state.zoom) * 1.66));
   document.getElementById("copy-cursor").addEventListener("click", () => copyCoords(state.cursor));
   document.getElementById("copy-selected-coords").addEventListener("click", () => copyCoords(selectedPoint()));
   document.getElementById("copy-selected-tp").addEventListener("click", () => copyTp(selectedPoint()));
@@ -1575,15 +1838,19 @@ function bindEvents() {
   document.getElementById("copy-active-seed").addEventListener("click", () => state.seed && copyText(state.seed, "Seed copied"));
   document.getElementById("reset-view-btn").addEventListener("click", () => {
     if (!state.structures.spawn) return;
+    cancelMomentum();
     state.viewX = state.structures.spawn.x;
     state.viewZ = state.structures.spawn.z;
-    state.zoom = DEFAULT_ZOOM;
+    setZoomImmediate(DEFAULT_ZOOM);
     selectLocation({ type:"spawn", ...state.structures.spawn, ...STRUCT_META.spawn });
     scheduleUrlUpdate();
     requestRender();
   });
+  els.zoomRange.min = "0";
+  els.zoomRange.max = "1";
+  els.zoomRange.step = "0.001";
   els.zoomRange.addEventListener("input", event => {
-    state.zoom = clamp(Number(event.target.value) || 4, MIN_ZOOM, MAX_ZOOM);
+    setZoomImmediate(sliderToZoom(Number(event.target.value)));
     scheduleUrlUpdate();
     requestRender();
   });
