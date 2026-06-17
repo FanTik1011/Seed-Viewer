@@ -26,11 +26,14 @@ const LODS = [
 ];
 const MIN_ZOOM = 0.5;
 
-const MAX_ZOOM = 2.2;
-const DEFAULT_ZOOM = 2.0;
+const MAX_ZOOM = 1.9;
+const DEFAULT_ZOOM = 1.9;
 const ZOOM_EASE = 0.25;
 const PAN_FRICTION = 0.9;
 const INITIAL_SCAN_RADIUS = 6144;
+const MAP_BG = "#07110f";
+const EMPTY_TILE_COLORS = ["#0c1915", "#101e19"];
+const UNKNOWN_BIOME_RGB = [38, 45, 41];
 
 const ICONS = {
   map: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 18 3 21V6l6-3 6 3 6-3v15l-6 3-6-3Z"/><path d="M9 3v15M15 6v15"/></svg>',
@@ -88,6 +91,25 @@ const BIOME_COLORS = {
   184:"#347e5b",185:"#f2a9bd",186:"#d6dde0"
 };
 
+Object.assign(BIOME_COLORS, {
+  0:"#2d7fd1",1:"#8fbd58",2:"#e8d08a",3:"#7b876d",4:"#3f8d4b",5:"#3f8a73",
+  6:"#4e8064",7:"#2e84cc",8:"#c45a45",9:"#e8e3c8",10:"#88c6dc",11:"#9cd4e0",
+  12:"#d9e8ef",13:"#95a7b0",14:"#d4bba6",15:"#cfae7d",16:"#eadc9d",17:"#d5b45c",
+  18:"#5d8c44",19:"#2f7267",20:"#638d54",21:"#3d9d4d",22:"#2f743e",23:"#45a852",
+  24:"#1e619d",25:"#8b8f8b",26:"#9dc7bf",27:"#6aa84e",28:"#4faf48",29:"#2e6541",
+  30:"#376b69",31:"#2d5958",32:"#5d8f52",33:"#477a45",34:"#789174",35:"#d2bd59",
+  36:"#c4ae4b",37:"#c2744b",38:"#b7663d",39:"#a64f31",44:"#42b6c8",45:"#3f98bd",
+  46:"#307fb0",47:"#2e719f",48:"#275d8e",49:"#214b78",50:"#1d3d67",127:"#17171b",
+  129:"#8fbd58",130:"#d5b55d",131:"#7a866e",132:"#4fa54f",133:"#3f7f69",134:"#5c816a",
+  140:"#a7b6c6",149:"#50a64b",151:"#5aa653",155:"#57bd58",156:"#4fba50",157:"#3f7441",
+  158:"#345f5c",160:"#60895b",161:"#5a8655",162:"#6f8a68",163:"#cbbb52",164:"#b8ae4a",
+  165:"#bd6f43",166:"#ad6239",167:"#98482f",168:"#56b95a",169:"#4b9b4e",170:"#755237",
+  171:"#b53a42",172:"#317f78",173:"#555969",174:"#66875b",175:"#48a877",177:"#8dbb61",
+  178:"#7fa873",179:"#e3edf1",180:"#cfdae2",181:"#c0ccd6",182:"#9a9a84",183:"#24283d",
+  184:"#448a67",185:"#f1a8bd",186:"#dfe5df"
+});
+const BIOME_RGB = new Map(Object.entries(BIOME_COLORS).map(([id, hex]) => [Number(id), hexToRgb(hex)]));
+
 const BIOME_NAMES = {
   0:"Ocean",1:"Plains",2:"Desert",3:"Mountains",4:"Forest",5:"Taiga",6:"Swamp",7:"River",
   8:"Nether Wastes",9:"The End",10:"Frozen Ocean",11:"Frozen River",12:"Snowy Tundra",
@@ -100,6 +122,14 @@ const BIOME_NAMES = {
   180:"Jagged Peaks",181:"Frozen Peaks",182:"Stony Peaks",183:"Deep Dark",
   184:"Mangrove Swamp",185:"Cherry Grove",186:"Pale Garden"
 };
+
+const VILLAGE_LABEL_RULES = [
+  { label:"Snowy Village", match: name => /snow|frozen|ice|grove/i.test(name) },
+  { label:"Taiga Village", match: name => /taiga/i.test(name) },
+  { label:"Savanna Village", match: name => /savanna/i.test(name) },
+  { label:"Desert Village", match: name => /desert/i.test(name) },
+  { label:"Plains Village", match: name => /plains|meadow|sunflower/i.test(name) }
+];
 
 const STRUCT_META = {
   spawn: { label:"Spawn Point", icon:"home", color:"#edf3ee" },
@@ -686,7 +716,7 @@ function render() {
   raf = 0;
   ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
   ctx.imageSmoothingEnabled = false;
-  ctx.fillStyle = "#080a09";
+  ctx.fillStyle = MAP_BG;
   ctx.fillRect(0, 0, state.width, state.height);
   if (!state.loaded) return;
 
@@ -750,8 +780,7 @@ function queueCoarseFallbacks(range) {
   }
 }
 
-// While a tile loads, borrow pixels from an already-cached coarser tile so the
-// map refines progressively instead of flashing a checkerboard.
+
 function drawFallbackTile(fineLod, tx, tz, pos, tilePx) {
   const fine = LODS[fineLod];
   const wx = tx * fine.blocks;
@@ -784,9 +813,9 @@ function drawBiomes(range) {
         tile.last = performance.now();
         ctx.drawImage(tile.canvas, pos.x, pos.y, tilePx + 1, tilePx + 1);
       } else if (state.showBiomes && drawFallbackTile(range.lod, tx, tz, pos, tilePx)) {
-        // refined-in-place from a coarser tile
+      
       } else {
-        ctx.fillStyle = ((tx + tz) & 1) ? "#101411" : "#0d110f";
+        ctx.fillStyle = EMPTY_TILE_COLORS[(tx + tz) & 1];
         ctx.fillRect(pos.x, pos.y, tilePx + 1, tilePx + 1);
       }
       if (state.showBiomes && !tile) queueTile(range.lod, tx, tz, true);
@@ -797,25 +826,26 @@ function drawBiomes(range) {
 function drawDistantMap() {
   ctx.save();
   const step = Math.max(28, Math.min(88, 520 / state.zoom));
-  ctx.fillStyle = state.dimension === "nether" ? "#160808" : state.dimension === "end" ? "#0d0a16" : "#08100d";
+  ctx.fillStyle = state.dimension === "nether" ? "#1a0c0b" : state.dimension === "end" ? "#100e18" : MAP_BG;
   ctx.fillRect(0, 0, state.width, state.height);
   for (let y = -step; y < state.height + step; y += step) {
     for (let x = -step; x < state.width + step; x += step) {
       const world = screenToWorld(x, y);
-      const n = terrainNoise(Math.floor(world.x / 64), Math.floor(world.z / 64));
+      const n = smoothTerrainNoise(Math.floor(world.x / 96), Math.floor(world.z / 96));
       const water = n < .28;
       const ridge = n > .78;
       if (state.dimension === "nether") {
-        ctx.fillStyle = n < .25 ? "rgba(105,31,28,.35)" : ridge ? "rgba(230,91,48,.24)" : "rgba(88,24,22,.22)";
+        ctx.fillStyle = n < .25 ? "rgba(128,40,32,.36)" : ridge ? "rgba(226,94,54,.28)" : "rgba(96,30,28,.24)";
       } else if (state.dimension === "end") {
-        ctx.fillStyle = n < .2 ? "rgba(52,44,78,.22)" : ridge ? "rgba(224,213,156,.2)" : "rgba(132,115,158,.16)";
+        ctx.fillStyle = n < .2 ? "rgba(59,49,89,.24)" : ridge ? "rgba(231,220,170,.22)" : "rgba(132,119,167,.18)";
       } else {
-        ctx.fillStyle = water ? "rgba(45,122,151,.24)" : ridge ? "rgba(184,153,92,.18)" : "rgba(72,139,78,.16)";
+        ctx.fillStyle = water ? "rgba(49,137,168,.28)" : ridge ? "rgba(203,171,104,.22)" : "rgba(87,151,86,.19)";
       }
       ctx.fillRect(x, y, step + 1, step + 1);
     }
   }
-  ctx.strokeStyle = "rgba(255,255,255,.035)";
+  drawMapVignette();
+  ctx.strokeStyle = "rgba(245,250,245,.035)";
   ctx.lineWidth = 1;
   for (let x = 0; x <= state.width; x += step) {
     ctx.beginPath();
@@ -832,11 +862,27 @@ function drawDistantMap() {
   ctx.restore();
 }
 
+function drawMapVignette() {
+  const g = ctx.createRadialGradient(
+    state.width * .5,
+    state.height * .45,
+    Math.min(state.width, state.height) * .15,
+    state.width * .5,
+    state.height * .5,
+    Math.max(state.width, state.height) * .72
+  );
+  g.addColorStop(0, "rgba(255,255,255,.035)");
+  g.addColorStop(.62, "rgba(0,0,0,0)");
+  g.addColorStop(1, "rgba(0,0,0,.24)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, state.width, state.height);
+}
+
 function drawGrid(range) {
   const tilePx = TILE_BLOCKS / state.zoom;
   if (tilePx < 18) return;
   ctx.lineWidth = 1;
-  ctx.strokeStyle = tilePx > 80 ? "rgba(5,12,24,.28)" : "rgba(5,12,24,.18)";
+  ctx.strokeStyle = tilePx > 80 ? "rgba(6,18,22,.30)" : "rgba(6,18,22,.20)";
   for (let tx = range.txMin; tx <= range.txMax + 1; tx++) {
     const x = worldToScreen(tx * TILE_BLOCKS, 0).x;
     ctx.beginPath();
@@ -879,9 +925,9 @@ function drawGridLabels(range) {
 
 function drawGridTag(text, x, y) {
   const w = Math.max(34, ctx.measureText(text).width + 10);
-  ctx.fillStyle = "rgba(8,10,14,.78)";
+  ctx.fillStyle = "rgba(7,12,14,.74)";
   roundRect(x - w / 2, y - 11, w, 22, 5, true, false);
-  ctx.fillStyle = "rgba(241,245,248,.88)";
+  ctx.fillStyle = "rgba(239,246,241,.9)";
   ctx.fillText(text, x, y + .5);
 }
 
@@ -1247,17 +1293,19 @@ function createTile(grid, lod, tx, tz) {
   cnv.height = s;
   const c = cnv.getContext("2d", { alpha: false });
   const img = c.createImageData(s, s);
+  const data = img.data;
   for (let i = 0; i < grid.length; i++) {
     const lx = i % s;
     const lz = Math.floor(i / s);
     const worldX = tx * cfg.blocks + lx * cfg.scale;
     const worldZ = tz * cfg.blocks + lz * cfg.scale;
-    const rgb = tintBiome(hexToRgb(BIOME_COLORS[grid[i]] || "#252a27"), worldX >> 4, worldZ >> 4, grid[i]);
+    const biomeId = grid[i];
+    const color = tintBiome(BIOME_RGB.get(biomeId) || UNKNOWN_BIOME_RGB, worldX >> 4, worldZ >> 4, biomeId);
     const j = i * 4;
-    img.data[j] = rgb[0];
-    img.data[j + 1] = rgb[1];
-    img.data[j + 2] = rgb[2];
-    img.data[j + 3] = 255;
+    data[j] = (color >> 16) & 255;
+    data[j + 1] = (color >> 8) & 255;
+    data[j + 2] = color & 255;
+    data[j + 3] = 255;
   }
   c.putImageData(img, 0, 0);
   return { canvas: cnv, grid, lod, samples: s, scale: cfg.scale, blocks: cfg.blocks, last: performance.now() };
@@ -1265,15 +1313,31 @@ function createTile(grid, lod, tx, tz) {
 
 function tintBiome(rgb, x, z, biomeId) {
   const n = terrainNoise(x, z);
+  const soft = smoothTerrainNoise(x >> 2, z >> 2);
   const water = biomeId === 0 || biomeId === 7 || (biomeId >= 44 && biomeId <= 50);
   const snowy = biomeId === 10 || biomeId === 11 || biomeId === 12 || biomeId === 179 || biomeId === 180 || biomeId === 181;
-  const strength = water ? 12 : snowy ? 6 : 18;
-  const shade = Math.round((n - .5) * strength);
-  return [
-    clamp(rgb[0] + shade, 0, 255),
-    clamp(rgb[1] + shade, 0, 255),
-    clamp(rgb[2] + shade, 0, 255)
-  ];
+  const strength = water ? 15 : snowy ? 8 : 22;
+  const shade = Math.round((n - .5) * strength + (soft - .5) * (strength * .55));
+  const warmth = water ? -3 : snowy ? 5 : Math.round((soft - .5) * 8);
+  const r = clamp(rgb[0] + shade + warmth, 0, 255);
+  const g = clamp(rgb[1] + shade + (water ? 1 : 0), 0, 255);
+  const b = clamp(rgb[2] + shade - warmth, 0, 255);
+  return (r << 16) | (g << 8) | b;
+}
+
+function smoothTerrainNoise(x, z) {
+  const center = terrainNoise(x, z) * 4;
+  const edges =
+    terrainNoise(x - 1, z) +
+    terrainNoise(x + 1, z) +
+    terrainNoise(x, z - 1) +
+    terrainNoise(x, z + 1);
+  const corners =
+    terrainNoise(x - 1, z - 1) +
+    terrainNoise(x + 1, z - 1) +
+    terrainNoise(x - 1, z + 1) +
+    terrainNoise(x + 1, z + 1);
+  return (center + edges * 2 + corners) / 16;
 }
 
 function terrainNoise(x, z) {
@@ -1293,6 +1357,19 @@ function hexToRgb(hex) {
   return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
 }
 
+function villageLabelAt(x, z) {
+  const biome = biomeAt(x, z);
+  if (!biome || biome === "Biome loading" || biome === "Biome unavailable") return STRUCT_META.Village.label;
+  const rule = VILLAGE_LABEL_RULES.find(item => item.match(biome));
+  return rule ? rule.label : "Plains Village";
+}
+
+function markerMetaFor(key, point) {
+  const meta = STRUCT_META[key];
+  if (key !== "Village") return meta;
+  return { ...meta, label: villageLabelAt(point.x, point.z) };
+}
+
 function visibleMarkers() {
   const markers = [];
   if (state.vis.spawn && isFeatureAvailable("spawn") && state.structures.spawn) {
@@ -1308,7 +1385,7 @@ function visibleMarkers() {
     if (!isFeatureAvailable(key)) continue;
     const list = state.structures[key];
     if (!Array.isArray(list)) continue;
-    for (const point of list) markers.push({ type:key, x:point.x, z:point.z, ...STRUCT_META[key] });
+    for (const point of list) markers.push({ type:key, x:point.x, z:point.z, ...markerMetaFor(key, point) });
   }
   return markers;
 }

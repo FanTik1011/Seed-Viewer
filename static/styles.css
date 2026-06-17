@@ -361,9 +361,10 @@
     min-height: 0;
     overflow: hidden;
     background:
-      linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255,255,255,.02) 1px, transparent 1px),
-      #07100d;
+      linear-gradient(rgba(233,245,235,.026) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(233,245,235,.02) 1px, transparent 1px),
+      radial-gradient(circle at 50% 42%, rgba(79,151,102,.12), transparent 42%),
+      #07110f;
     background-size: 32px 32px;
   }
   #map-canvas {
@@ -373,7 +374,7 @@
     height: 100%;
     cursor: grab;
     image-rendering: pixelated;
-    background: #070a09;
+    background: #07110f;
   }
   #map-canvas.dragging { cursor: grabbing; }
 
