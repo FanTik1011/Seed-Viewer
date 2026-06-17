@@ -1,26 +1,48 @@
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 import ctypes
 import os
 import sys
 import random
-import struct
 import logging
 import math
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from functools import wraps, lru_cache
+from functools import lru_cache
 
-# ─── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
 log = logging.getLogger(__name__)
 
+def _normalise_base_path(value: str) -> str:
+    value = (value or "").strip()
+    if not value or value == "/":
+        return ""
+    return "/" + value.strip("/")
+
+
+PUBLIC_BASE_PATH = _normalise_base_path(os.environ.get("PUBLIC_BASE_PATH", ""))
+
+
+class PrefixMiddleware:
+    def __init__(self, app, prefix: str):
+        self.app = app
+        self.prefix = prefix
+
+    def __call__(self, environ, start_response):
+        path = environ.get("PATH_INFO", "")
+        if self.prefix and (path == self.prefix or path.startswith(self.prefix + "/")):
+            environ["SCRIPT_NAME"] = self.prefix
+            environ["PATH_INFO"] = path[len(self.prefix):] or "/"
+        return self.app(environ, start_response)
+
+
 app = Flask(__name__, static_folder='static', template_folder='templates')
 CORS(app, origins=["http://localhost:*", "http://127.0.0.1:*"])
+if PUBLIC_BASE_PATH:
+    app.wsgi_app = PrefixMiddleware(app.wsgi_app, PUBLIC_BASE_PATH)
 
-# ─── Load shared library (cross-platform) ─────────────────────────────────────
 def _find_lib():
     base = os.path.dirname(os.path.abspath(__file__))
     if sys.platform.startswith("win"):
@@ -46,7 +68,6 @@ except FileNotFoundError as e:
     log.critical(str(e))
     sys.exit(1)
 
-# ─── Structs ───────────────────────────────────────────────────────────────────
 class SpawnPos(ctypes.Structure):
     _fields_ = [("x", ctypes.c_int), ("z", ctypes.c_int)]
 
@@ -56,7 +77,6 @@ class SHPos(ctypes.Structure):
 class StructPos(ctypes.Structure):
     _fields_ = [("x", ctypes.c_int), ("z", ctypes.c_int)]
 
-# ─── Function signatures ───────────────────────────────────────────────────────
 lib.get_biome_grid.restype  = ctypes.POINTER(ctypes.c_int)
 lib.get_biome_grid.argtypes = [
     ctypes.c_longlong, ctypes.c_int,
@@ -109,17 +129,13 @@ try:
 except AttributeError:
     HAS_DIM_STRUCTURES = False
 
-# ─── Constants ─────────────────────────────────────────────────────────────────
 MC_VERSIONS = {
-    # Keep these in sync with cubiomes/biomes.h enum MCVersion.
-    # Wrong values make 1.19 and older use pre-Caves & Cliffs generators,
-    # which is both inaccurate and noticeably slower for map tiles.
-    "1.16": 20,  # MC_1_16
-    "1.17": 21,  # MC_1_17
-    "1.18": 22,  # MC_1_18
-    "1.19": 24,  # MC_1_19
-    "1.20": 25,  # MC_1_20
-    "1.21": 28,  # MC_1_21
+    "1.16": 20,
+    "1.17": 21,
+    "1.18": 22,
+    "1.19": 24,
+    "1.20": 25,
+    "1.21": 28,
 }
 
 STRUCT_TYPES = {
@@ -161,8 +177,6 @@ JAVA_RAND_ADD = 0xB
 JAVA_RAND_MASK = (1 << 48) - 1
 U64_MASK = (1 << 64) - 1
 
-# Structures available per version (using tuple comparison on version string key)
-# version string → set of unlocked extras
 _VERSION_EXTRAS = {
     "1.16": {"Ruined_Portal", "Ruined_Portal_Nether", "Fortress", "Bastion", "End_City", "End_Gateway", "End_Island"},
     "1.17": {"Ruined_Portal", "Ruined_Portal_Nether", "Geode", "Fortress", "Bastion", "End_City", "End_Gateway", "End_Island"},
@@ -178,7 +192,6 @@ OVERWORLD_BASE_STRUCTS = [
     "Ocean_Ruins", "Shipwreck", "Treasure", "Mineshaft", "Desert_Well",
 ]
 
-# ─── Limits ────────────────────────────────────────────────────────────────────
 MAX_BIOME_W     = 256
 MAX_BIOME_H     = 256
 MAX_STRUCT_W    = 32768
@@ -190,9 +203,7 @@ MAX_SEARCH_ATTEMPTS = 250
 MAX_SEARCH_RESULTS  = 24
 MAX_SEARCH_RADIUS   = 6000
 
-# ─── Helpers ───────────────────────────────────────────────────────────────────
 def seed_to_int(seed_str: str) -> int:
-    """Convert text seed → Java-style signed long, matching Minecraft's logic."""
     s = seed_str.strip()
     try:
         val = int(s)
@@ -205,7 +216,6 @@ def seed_to_int(seed_str: str) -> int:
 
 
 def _int_arg(name: str, default: int, lo: int | None = None, hi: int | None = None) -> int:
-    """Parse and clamp a query-string integer with validation."""
     raw = request.args.get(name, str(default))
     try:
         v = int(raw)
@@ -219,7 +229,6 @@ def _int_arg(name: str, default: int, lo: int | None = None, hi: int | None = No
 
 
 def ctypes_call(fn, *args):
-    """Wrap a ctypes call so a segfault-prone exception is caught gracefully."""
     try:
         return fn(*args)
     except Exception as exc:
@@ -332,30 +341,21 @@ def _nearest_distance(points: list[dict], origin: dict) -> float | None:
 @lru_cache(maxsize=4096)
 def _biome_grid_cached(seed: int, mc: int, dim_id: int,
                        x: int, z: int, w: int, h: int, scale: int) -> tuple:
-    """
-    Biome generation is fully deterministic for a given seed/version/region,
-    so the result is memoised. The native call releases the GIL, so with a
-    threaded server several misses can compute in parallel; repeat views are
-    served straight from this cache.
-    """
     if dim_id == 0:
         ptr = ctypes_call(lib.get_biome_grid, seed, mc, x, z, w, h, scale)
     else:
         ptr = ctypes_call(lib.get_biome_grid_dim, seed, mc, dim_id, x, z, w, h, scale)
     if not ptr:
         raise RuntimeError("Biome generation failed")
-    # ptr[:n] copies the whole buffer at C speed — far faster than a per-element
-    # Python loop, which dominated large-tile (up to 256x256) generation time.
     n = w * h
     grid = tuple(ptr[:n])
     lib.free_array(ptr)
     return grid
 
 
-# ─── Routes ────────────────────────────────────────────────────────────────────
 @app.route('/')
 def index():
-    return send_from_directory('templates', 'index.html')
+    return render_template('index.html', base_path=PUBLIC_BASE_PATH)
 
 
 @app.route('/api/versions')
@@ -383,7 +383,6 @@ def random_seed():
 
 @app.route('/api/biomes')
 def biomes():
-    """Return a biome-ID grid for a rectangular region."""
     seed_str = request.args.get('seed', '0')
     version  = request.args.get('version', '1.20')
     dimension = _dimension_arg()
@@ -413,7 +412,6 @@ def biomes():
         "x": x, "z": z, "w": w, "h": h, "scale": scale,
         "grid": grid,
     })
-    # Deterministic for these exact params → safe to cache hard in the browser.
     resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
     return resp
 
@@ -492,11 +490,6 @@ def structures():
 
 @app.route('/api/all_structures')
 def all_structures():
-    """
-    Fetch spawn, strongholds, and all applicable structure types in parallel.
-    Uses ThreadPoolExecutor so ctypes calls (which release the GIL while in C)
-    overlap instead of queuing serially.
-    """
     seed_str = request.args.get('seed', '0')
     version  = request.args.get('version', '1.20')
     dimension = _dimension_arg()
@@ -545,7 +538,6 @@ def all_structures():
     for sname in available:
         tasks.append(lambda s=sname: fetch_struct(s))
 
-    # Use min(len(tasks), 8) workers — more than 8 won't help for cubiomes
     if tasks:
         with ThreadPoolExecutor(max_workers=min(len(tasks), MAX_STRUCTURE_WORKERS)) as pool:
             futures = {pool.submit(t): t.__name__ for t in tasks}
@@ -563,10 +555,6 @@ def all_structures():
 
 @app.route('/api/search_seeds')
 def search_seeds():
-    """
-    Find random Minecraft Java seeds that have selected structures near spawn.
-    This is intentionally bounded so the Flask dev server stays responsive.
-    """
     version = request.args.get('version', '1.20')
     if version not in MC_VERSIONS:
         return error(f"Unknown version: {version!r}")
@@ -637,7 +625,6 @@ def search_seeds():
     })
 
 
-# ─── Error handlers ────────────────────────────────────────────────────────────
 @app.errorhandler(404)
 def not_found(e):
     return jsonify({"error": "Not found"}), 404
@@ -647,7 +634,6 @@ def server_error(e):
     return jsonify({"error": "Internal server error"}), 500
 
 
-# ─── Entry point ───────────────────────────────────────────────────────────────
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     debug = os.environ.get("FLASK_DEBUG", "0") == "1"

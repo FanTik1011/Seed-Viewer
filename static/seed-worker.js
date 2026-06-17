@@ -1,4 +1,4 @@
-const API = "";
+const API = self.location.pathname.replace(/\/static\/seed-worker\.js$/, "");
 const controllers = new Map();
 const UNKNOWN_BIOME_RGB = [38, 45, 41];
 const BIOME_COLORS = {
@@ -34,7 +34,6 @@ function terrainNoise(x, z) {
 }
 
 function tintBiome(rgb, x, z, biomeId) {
-  // Amidst-style flat biome colors: solid color per biome, no per-pixel noise.
   return (rgb[0] << 16) | (rgb[1] << 8) | rgb[2];
 }
 

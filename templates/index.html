@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SeedMap</title>
-<link rel="stylesheet" href="/static/styles.css">
+<link rel="stylesheet" href="{{ base_path }}/static/styles.css">
 </head>
 <body>
 <div class="app">
@@ -165,6 +165,18 @@
   </main>
 </div>
 
-<script src="/static/app.js"></script>
+<script>window.SEED_VIEWER_BASE_PATH = "{{ base_path }}";</script>
+<script src="{{ base_path }}/static/js/config.js"></script>
+<script src="{{ base_path }}/static/js/data.js"></script>
+<script src="{{ base_path }}/static/js/state.js"></script>
+<script src="{{ base_path }}/static/js/worker-api.js"></script>
+<script src="{{ base_path }}/static/js/icons.js"></script>
+<script src="{{ base_path }}/static/js/map-core.js"></script>
+<script src="{{ base_path }}/static/js/map-render.js"></script>
+<script src="{{ base_path }}/static/js/tile-stream.js"></script>
+<script src="{{ base_path }}/static/js/locations.js"></script>
+<script src="{{ base_path }}/static/js/world.js"></script>
+<script src="{{ base_path }}/static/js/ui.js"></script>
+<script src="{{ base_path }}/static/js/boot.js"></script>
 </body>
 </html>

@@ -1,0 +1,12 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.git/
+.agents/
+.codex/
+server-*.log
+*.out.log
+*.err.log
+libseedmap.dll
+docker/README.md
