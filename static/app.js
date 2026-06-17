@@ -11,6 +11,10 @@ const TILE_REQUEST_TIMEOUT = 9000;
 const MAX_TILE_ATTEMPTS = 3;
 const TILE_RETRY_PENALTY = 4000;
 const PREFETCH_MARGIN = 0;
+const MAX_TILE_ENQUEUE_PER_RENDER = 28;
+const MAX_TILE_QUEUE_WHILE_LOADING = 96;
+const TILE_QUEUE_VIEW_MARGIN = 1;
+const TILE_RESULT_KEEP_MARGIN = 1;
 
 // Marker rendering thresholds. Above LITE_LIMIT on-screen markers (or while the
 // map is moving) draw cheap dots; above LABEL_LIMIT stop drawing per-marker text.
@@ -989,10 +993,12 @@ function drawFallbackTile(fineLod, tx, tz, pos, tilePx) {
   return false;
 }
 
-function drawBiomes(range) {
+function drawBiomes(range, queueVisible = true) {
   const cfg = LODS[range.lod];
   const tilePx = cfg.blocks / state.zoom;
   const tiles = orderedTiles(range);
+  let queuedThisFrame = 0;
+  const queueBudget = state.tileQueue.size > MAX_TILE_QUEUE_WHILE_LOADING ? 0 : MAX_TILE_ENQUEUE_PER_RENDER;
   for (const item of tiles) {
       const { tx, tz } = item;
       const key = tileKey(range.lod, tx, tz);
@@ -1006,13 +1012,16 @@ function drawBiomes(range) {
       } else {
         drawPendingTile(pos, tilePx, item.dist);
       }
-      if (state.showBiomes && !tile) queueTile(range.lod, tx, tz, true);
+      if (queueVisible && state.showBiomes && !tile && queuedThisFrame < queueBudget) {
+        if (queueTile(range.lod, tx, tz, true)) queuedThisFrame++;
+      }
   }
+  if (queuedThisFrame >= queueBudget && queueBudget > 0) requestRender();
 }
 
 function drawSeedmapLoadingMap(range) {
   ctx.save();
-  drawBiomes(range);
+  drawBiomes(range, false);
   ctx.strokeStyle = "rgba(255,255,255,.18)";
   ctx.lineWidth = 1;
   drawLoadedTileOutline(range);
@@ -1374,16 +1383,28 @@ function roundRect(x, y, w, h, r, fill, stroke) {
 
 function queueTile(lod, tx, tz, visible = false) {
   const key = tileKey(lod, tx, tz);
-  if (state.tiles.has(key) || state.pendingTiles.has(key) || state.tileQueue.has(key)) return;
-  const b = LODS[lod].blocks;
-  const cx = tx * b + b / 2;
-  const cz = tz * b + b / 2;
-  let priority = Math.hypot(cx - state.viewX, cz - state.viewZ);
-  if (visible) priority -= VISIBLE_TILE_PRIORITY_BOOST;
-  if (lod > 0) priority -= COARSE_TILE_PRIORITY_BOOST / lod;
+  if (state.tiles.has(key) || state.pendingTiles.has(key) || state.tileQueue.has(key)) return false;
+  const priority = tilePriority(lod, tx, tz, visible);
   state.tileQueue.set(key, { lod, tx, tz, priority, visible, runId: state.runId, attempts: 0 });
   if (state.tileQueue.size > MAX_TILE_QUEUE) pruneTileQueue();
   scheduleTilePump();
+  return true;
+}
+
+function tilePriority(lod, tx, tz, visible = false, attempts = 0) {
+  const b = LODS[lod].blocks;
+  const cx = tx * b + b / 2;
+  const cz = tz * b + b / 2;
+  let priority = Math.hypot(cx - state.viewX, cz - state.viewZ) + attempts * TILE_RETRY_PENALTY;
+  if (visible) priority -= VISIBLE_TILE_PRIORITY_BOOST;
+  if (lod > 0) priority -= COARSE_TILE_PRIORITY_BOOST / lod;
+  return priority;
+}
+
+function refreshTilePriorities() {
+  for (const job of state.tileQueue.values()) {
+    job.priority = tilePriority(job.lod, job.tx, job.tz, job.visible, job.attempts || 0);
+  }
 }
 
 function scheduleTilePump() {
@@ -1403,6 +1424,7 @@ function pumpTiles() {
     return;
   }
   if (state.pendingTiles.size >= MAX_TILE_REQUESTS || !state.tileQueue.size) return;
+  refreshTilePriorities();
   const sorted = [...state.tileQueue.values()].sort((a, b) => a.priority - b.priority);
   let i = 0;
   while (state.pendingTiles.size < MAX_TILE_REQUESTS && i < sorted.length) {
@@ -1413,6 +1435,7 @@ function pumpTiles() {
 }
 
 function pruneTileQueue() {
+  refreshTilePriorities();
   const keep = [...state.tileQueue.entries()]
     .sort((a, b) => a[1].priority - b[1].priority)
     .slice(0, MAX_TILE_QUEUE);
@@ -1421,14 +1444,17 @@ function pruneTileQueue() {
 
 function trimTileQueueToView(range) {
   if (!state.tileQueue.size) return;
-  const margin = 3;
   for (const [key, job] of state.tileQueue) {
-    const offscreen = job.lod !== range.lod ||
-      job.tx < range.txMin - margin || job.tx > range.txMax + margin ||
-      job.tz < range.tzMin - margin || job.tz > range.tzMax + margin ||
-      job.runId !== state.runId;
-    if (offscreen) state.tileQueue.delete(key);
+    if (!tileJobInRange(job, range, TILE_QUEUE_VIEW_MARGIN) || job.runId !== state.runId) {
+      state.tileQueue.delete(key);
+    }
   }
+}
+
+function tileJobInRange(job, range, margin = 0) {
+  return job.lod === range.lod &&
+    job.tx >= range.txMin - margin && job.tx <= range.txMax + margin &&
+    job.tz >= range.tzMin - margin && job.tz <= range.tzMax + margin;
 }
 
 function withTimeout(promise, ms, message = "Request timed out") {
@@ -1445,11 +1471,8 @@ function requeueTile(job) {
   const key = tileKey(job.lod, job.tx, job.tz);
   if (state.tiles.has(key) || state.pendingTiles.has(key) || state.tileQueue.has(key)) return;
   const attempts = (job.attempts || 0) + 1;
-  const b = LODS[job.lod].blocks;
-  const cx = job.tx * b + b / 2;
-  const cz = job.tz * b + b / 2;
-  const priority = Math.hypot(cx - state.viewX, cz - state.viewZ) + attempts * TILE_RETRY_PENALTY;
-  state.tileQueue.set(key, { lod: job.lod, tx: job.tx, tz: job.tz, priority, runId: job.runId, attempts });
+  const priority = tilePriority(job.lod, job.tx, job.tz, job.visible, attempts);
+  state.tileQueue.set(key, { lod: job.lod, tx: job.tx, tz: job.tz, priority, visible: job.visible, runId: job.runId, attempts });
   if (state.tileQueue.size > MAX_TILE_QUEUE) pruneTileQueue();
 }
 
@@ -1479,6 +1502,8 @@ async function loadTile(job) {
       "Tile request timed out"
     );
     if (job.runId !== state.runId || !data.grid) return;
+    const currentRange = biomeTileRange(pickLod());
+    if (!tileJobInRange(job, currentRange, TILE_RESULT_KEEP_MARGIN)) return;
     tileBuildQueue.push({ key, grid: data.grid, lod: job.lod, tx: job.tx, tz: job.tz, runId: job.runId });
     queued = true;
     scheduleTileBuild();
