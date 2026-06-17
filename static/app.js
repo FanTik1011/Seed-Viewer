@@ -4,17 +4,21 @@ const WORKER_URL = "/static/seed-worker.js";
 const SAMPLE_SCALE = 8;
 const TILE_SAMPLES = TILE_BLOCKS / SAMPLE_SCALE;
 const MAX_TILE_CACHE = 650;
-const MAX_TILE_QUEUE = 360;
-const MAX_TILE_REQUESTS = Math.max(4, Math.min(8, navigator.hardwareConcurrency || 4));
+const MAX_TILE_QUEUE = 120;
+const MAX_TILE_REQUESTS = Math.max(2, Math.min(4, Math.floor((navigator.hardwareConcurrency || 4) / 2)));
 const MAX_DRAW_TILES = 240;
 const TILE_REQUEST_TIMEOUT = 9000;
+// Backstop so a hung structure request can't stall the loader or the region
+// streamer's in-flight counter (which would otherwise stop locations loading).
+const STRUCT_REQUEST_TIMEOUT = 15000;
 const MAX_TILE_ATTEMPTS = 3;
 const TILE_RETRY_PENALTY = 4000;
 const PREFETCH_MARGIN = 0;
-const MAX_TILE_ENQUEUE_PER_RENDER = 28;
-const MAX_TILE_QUEUE_WHILE_LOADING = 96;
-const TILE_QUEUE_VIEW_MARGIN = 1;
-const TILE_RESULT_KEEP_MARGIN = 1;
+const MAX_TILE_ENQUEUE_PER_RENDER = 10;
+const MAX_TILE_QUEUE_WHILE_LOADING = 36;
+const TILE_VIEW_MARGIN = 0;
+const TILE_QUEUE_VIEW_MARGIN = 0;
+const TILE_RESULT_KEEP_MARGIN = 0;
 
 // Marker rendering thresholds. Above LITE_LIMIT on-screen markers (or while the
 // map is moving) draw cheap dots; above LABEL_LIMIT stop drawing per-marker text.
@@ -47,11 +51,12 @@ const STRUCT_FAST_TYPES = [
   "Desert_Temple", "Jungle_Temple", "Witch_Hut", "Igloo"
 ];
 
-const WORKER_POOL_SIZE = Math.max(2, Math.min(5, Math.ceil((navigator.hardwareConcurrency || 4) / 2)));
+const WORKER_POOL_SIZE = Math.max(2, Math.min(3, Math.ceil((navigator.hardwareConcurrency || 4) / 3)));
 const VISIBLE_TILE_PRIORITY_BOOST = 1_000_000;
 const COARSE_TILE_PRIORITY_BOOST = 500_000;
 const TILE_BUILD_BATCH = 6;
 const TILE_BUILD_FRAME_BUDGET = 4;
+const TILE_PENDING_VIEW_MARGIN = 2;
 
 
 const LODS = [
@@ -61,7 +66,7 @@ const LODS = [
   { blocks: 16384, samples: 256, scale: 64 }
 ];
 const MIN_ZOOM = 0.4;
-const MAX_ZOOM = 16;
+const MAX_ZOOM = 8;   // was 16: cap how far the map can zoom out (smaller view area → faster location loading)
 const DEFAULT_ZOOM = 2;
 const ZOOM_EASE = 0.25;
 const PAN_FRICTION = 0.9;
@@ -466,7 +471,7 @@ const state = {
   dpr: 1,
   tiles: new Map(),
   tileQueue: new Map(),
-  pendingTiles: new Set(),
+  pendingTiles: new Map(),
   structures: {},
   structFetched: new Set(),
   structSeen: {},
@@ -542,17 +547,46 @@ function initWorker() {
 }
 
 function workerRequest(type, payload = {}) {
-  if (!workerPool.length) return directRequest(type, payload);
+  if (!workerPool.length) {
+    const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const promise = directRequest(type, payload, controller?.signal);
+    promise.cancel = () => controller?.abort();
+    return promise;
+  }
   const w = workerPool[workerCursor];
   workerCursor = (workerCursor + 1) % workerPool.length;
   const id = ++workerSeq;
-  return new Promise((resolve, reject) => {
-    workerJobs.set(id, { resolve, reject, worker: w });
+  const promise = new Promise((resolve, reject) => {
+    workerJobs.set(id, { resolve, reject, worker: w, type, payload });
     w.postMessage({ id, type, payload });
   });
+  promise.cancel = () => {
+    const job = workerJobs.get(id);
+    if (!job) return;
+    workerJobs.delete(id);
+    w.postMessage({ id, type: "cancel" });
+    job.reject(new DOMException("Request canceled", "AbortError"));
+  };
+  return promise;
 }
 
-async function directRequest(type, payload = {}) {
+function cancelWorkerJob(id, reason = "Request canceled") {
+  const job = workerJobs.get(id);
+  if (!job) return;
+  workerJobs.delete(id);
+  job.worker.postMessage({ id, type: "cancel" });
+  job.reject(new DOMException(reason, "AbortError"));
+}
+
+function cancelWorldWorkerJobs() {
+  for (const [id, job] of [...workerJobs]) {
+    if (job.type === "biomeTile" || job.type === "structures" || job.type === "structureType") {
+      cancelWorkerJob(id, "World changed");
+    }
+  }
+}
+
+async function directRequest(type, payload = {}, signal = undefined) {
   let url = "";
   if (type === "biomeTile") {
     const params = new URLSearchParams({
@@ -605,7 +639,7 @@ async function directRequest(type, payload = {}) {
   } else if (type === "capabilities") {
     url = `${API}/api/capabilities`;
   }
-  const response = await fetch(url);
+  const response = await fetch(url, { signal });
   const data = await response.json();
   if (!response.ok || data.error) throw new Error(data.error || "Request failed");
   return data;
@@ -790,7 +824,7 @@ function animateZoom() {
     state.zoom = t;
     zoomRaf = 0;
     unfreezeMarkers();
-    scheduleStructureStream(180, true);
+    loadVisibleStructuresNow();
   } else {
     state.zoom += diff * ZOOM_EASE;
     zoomRaf = requestAnimationFrame(animateZoom);
@@ -809,7 +843,7 @@ function startMomentum(vx, vz) {
   cancelMomentum();
   if (Math.hypot(vx, vz) < 0.015) {
     unfreezeMarkers();
-    scheduleStructureStream(160, true);
+    loadVisibleStructuresNow();
     return;
   }
   let last = performance.now();
@@ -828,7 +862,7 @@ function startMomentum(vx, vz) {
     } else {
       momentumRaf = 0;
       unfreezeMarkers();
-      scheduleStructureStream(160, true);
+      loadVisibleStructuresNow();
     }
   };
   freezeMarkers();
@@ -884,10 +918,10 @@ function biomeTileRange(lod) {
   const range = {
     lod,
     blocks: b,
-    txMin: Math.floor(tl.x / b) - 1,
-    txMax: Math.floor(br.x / b) + 1,
-    tzMin: Math.floor(tl.z / b) - 1,
-    tzMax: Math.floor(br.z / b) + 1
+    txMin: Math.floor(tl.x / b) - TILE_VIEW_MARGIN,
+    txMax: Math.floor(br.x / b) + TILE_VIEW_MARGIN,
+    tzMin: Math.floor(tl.z / b) - TILE_VIEW_MARGIN,
+    tzMax: Math.floor(br.z / b) + TILE_VIEW_MARGIN
   };
   range.count = (range.txMax - range.txMin + 1) * (range.tzMax - range.tzMin + 1);
   range.tilePx = b / state.zoom;
@@ -912,7 +946,10 @@ function render() {
     ? "Zoom in to stream detailed biomes"
     : "Biome streaming for this dimension needs a rebuilt native library";
   trimTileQueueToView(range);
+  cancelStaleTileRequests();
+  dropStaleTileBuilds();
   if (detailedBiomes) {
+    queueCoarseFallbacks(range);
     drawBiomes(range);
     prefetchAround(range);
     drawMapVignette();
@@ -951,16 +988,15 @@ function queueCoarseFallbacks(range) {
   const endX = (range.txMax + 1) * range.blocks - 1;
   const startZ = range.tzMin * range.blocks;
   const endZ = (range.tzMax + 1) * range.blocks - 1;
-  for (let lod = LODS.length - 1; lod > range.lod; lod--) {
-    const cfg = LODS[lod];
-    const txMin = Math.floor(startX / cfg.blocks);
-    const txMax = Math.floor(endX / cfg.blocks);
-    const tzMin = Math.floor(startZ / cfg.blocks);
-    const tzMax = Math.floor(endZ / cfg.blocks);
-    for (let tz = tzMin; tz <= tzMax; tz++) {
-      for (let tx = txMin; tx <= txMax; tx++) {
-        queueTile(lod, tx, tz, true);
-      }
+  const lod = range.lod + 1;
+  const cfg = LODS[lod];
+  const txMin = Math.floor(startX / cfg.blocks);
+  const txMax = Math.floor(endX / cfg.blocks);
+  const tzMin = Math.floor(startZ / cfg.blocks);
+  const tzMax = Math.floor(endZ / cfg.blocks);
+  for (let tz = tzMin; tz <= tzMax; tz++) {
+    for (let tx = txMin; tx <= txMax; tx++) {
+      queueTile(lod, tx, tz, true);
     }
   }
 }
@@ -1383,7 +1419,15 @@ function roundRect(x, y, w, h, r, fill, stroke) {
 
 function queueTile(lod, tx, tz, visible = false) {
   const key = tileKey(lod, tx, tz);
-  if (state.tiles.has(key) || state.pendingTiles.has(key) || state.tileQueue.has(key)) return false;
+  if (state.tiles.has(key) || state.pendingTiles.has(key)) return false;
+  const existing = state.tileQueue.get(key);
+  if (existing) {
+    if (visible && !existing.visible) {
+      existing.visible = true;
+      existing.priority = tilePriority(lod, tx, tz, true, existing.attempts || 0);
+    }
+    return false;
+  }
   const priority = tilePriority(lod, tx, tz, visible);
   state.tileQueue.set(key, { lod, tx, tz, priority, visible, runId: state.runId, attempts: 0 });
   if (state.tileQueue.size > MAX_TILE_QUEUE) pruneTileQueue();
@@ -1418,7 +1462,11 @@ function scheduleTilePump() {
 
 function pumpTiles() {
   if (!state.loaded) return;
-  if (!dimensionCaps().biomes) {
+  if (!dimensionCaps().biomes || !state.showBiomes) {
+    // Biomes off/unavailable: stop loading chunks and clear the pill rather than
+    // leaving queued/pending tiles that keep "Loading chunks" on screen.
+    // Cached tiles are kept, so re-enabling biomes redraws instantly.
+    cancelAllTileRequests();
     state.tileQueue.clear();
     updateChunkPill();
     return;
@@ -1445,10 +1493,18 @@ function pruneTileQueue() {
 function trimTileQueueToView(range) {
   if (!state.tileQueue.size) return;
   for (const [key, job] of state.tileQueue) {
-    if (!tileJobInRange(job, range, TILE_QUEUE_VIEW_MARGIN) || job.runId !== state.runId) {
+    if (!tileJobRelevant(job, TILE_QUEUE_VIEW_MARGIN) || job.runId !== state.runId) {
       state.tileQueue.delete(key);
     }
   }
+}
+
+function currentTileRangeForLod(lod) {
+  return biomeTileRange(lod);
+}
+
+function tileJobRelevant(job, margin = 0) {
+  return tileJobInRange(job, currentTileRangeForLod(job.lod), margin);
 }
 
 function tileJobInRange(job, range, margin = 0) {
@@ -1457,9 +1513,42 @@ function tileJobInRange(job, range, margin = 0) {
     job.tz >= range.tzMin - margin && job.tz <= range.tzMax + margin;
 }
 
+function cancelStaleTileRequests() {
+  if (!state.pendingTiles.size) return;
+  for (const [key, pending] of state.pendingTiles) {
+    if (pending.runId !== state.runId || !tileJobRelevant(pending, TILE_PENDING_VIEW_MARGIN)) {
+      pending.request?.cancel?.();
+      state.pendingTiles.delete(key);
+    }
+  }
+  updateChunkPill();
+}
+
+function cancelAllTileRequests() {
+  if (!state.pendingTiles.size) return;
+  for (const pending of state.pendingTiles.values()) {
+    pending.request?.cancel?.();
+  }
+  state.pendingTiles.clear();
+}
+
+function dropStaleTileBuilds() {
+  if (!tileBuildQueue.length) return;
+  for (let i = tileBuildQueue.length - 1; i >= 0; i--) {
+    const job = tileBuildQueue[i];
+    if (job.runId !== state.runId || !tileJobRelevant(job, TILE_RESULT_KEEP_MARGIN)) {
+      tileBuildQueue.splice(i, 1);
+      state.pendingTiles.delete(job.key);
+    }
+  }
+}
+
 function withTimeout(promise, ms, message = "Request timed out") {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(message)), ms);
+    const timer = setTimeout(() => {
+      promise.cancel?.();
+      reject(new Error(message));
+    }, ms);
     promise.then(
       value => { clearTimeout(timer); resolve(value); },
       err => { clearTimeout(timer); reject(err); }
@@ -1480,15 +1569,13 @@ async function loadTile(job) {
   const cfg = LODS[job.lod];
   const key = tileKey(job.lod, job.tx, job.tz);
   if (!dimensionCaps().biomes) return;
-  state.pendingTiles.add(key);
-  updateChunkPill();
   const bx = job.tx * cfg.blocks;
   const bz = job.tz * cfg.blocks;
   let queued = false;
   let retry = false;
+  let request = null;
   try {
-    const data = await withTimeout(
-      workerRequest("biomeTile", {
+    request = workerRequest("biomeTile", {
         seed: state.seed,
         version: state.version,
         dimension: state.dimension,
@@ -1497,23 +1584,26 @@ async function loadTile(job) {
         w: cfg.samples,
         h: cfg.samples,
         scale: cfg.scale
-      }),
+    });
+    state.pendingTiles.set(key, { ...job, key, request });
+    updateChunkPill();
+    const data = await withTimeout(
+      request,
       TILE_REQUEST_TIMEOUT,
       "Tile request timed out"
     );
     if (job.runId !== state.runId || !data.grid) return;
-    const currentRange = biomeTileRange(pickLod());
-    if (!tileJobInRange(job, currentRange, TILE_RESULT_KEEP_MARGIN)) return;
-    tileBuildQueue.push({ key, grid: data.grid, lod: job.lod, tx: job.tx, tz: job.tz, runId: job.runId });
+    if (!tileJobRelevant(job, TILE_RESULT_KEEP_MARGIN)) return;
+    tileBuildQueue.push({ key, grid: data.grid, bitmap: data.bitmap, lod: job.lod, tx: job.tx, tz: job.tz, runId: job.runId });
     queued = true;
     scheduleTileBuild();
   } catch (err) {
     // A blip shouldn't leave a permanent hole: retry a couple of times,
     // de-prioritised, as long as the tile is still in the current world.
-    if (job.runId === state.runId && (job.attempts || 0) + 1 < MAX_TILE_ATTEMPTS) {
+    if (err?.name !== "AbortError" && job.runId === state.runId && (job.attempts || 0) + 1 < MAX_TILE_ATTEMPTS) {
       retry = true;
     } else {
-      console.warn("Tile failed", err);
+      if (err?.name !== "AbortError") console.warn("Tile failed", err);
     }
   } finally {
     if (!queued) {
@@ -1533,6 +1623,7 @@ function scheduleTileBuild() {
 
 function buildQueuedTiles() {
   tileBuildPending = false;
+  dropStaleTileBuilds();
   let processed = 0;
   let built = 0;
   const deadline = performance.now() + TILE_BUILD_FRAME_BUDGET;
@@ -1540,12 +1631,14 @@ function buildQueuedTiles() {
     const job = tileBuildQueue.shift();
     processed++;
     if (job.runId === state.runId && job.grid) {
-      state.tiles.set(job.key, createTile(job.grid, job.lod, job.tx, job.tz));
-      pruneTileCache();
+      state.tiles.set(job.key, createTile(job.grid, job.lod, job.tx, job.tz, job.bitmap));
       built++;
     }
     state.pendingTiles.delete(job.key);
   }
+  // Prune once per batch (not per tile): a full cache sort per built tile was a
+  // real per-frame cost while streaming. A brief transient over the cap is fine.
+  if (built) pruneTileCache();
   updateChunkPill();
   // Village labels depend on biome tiles; refresh them once tiles settle, but
   // never mid-pan (that would rebuild the marker list during a drag).
@@ -1555,9 +1648,12 @@ function buildQueuedTiles() {
   if (tileBuildQueue.length) scheduleTileBuild();
 }
 
-function createTile(grid, lod, tx, tz) {
+function createTile(grid, lod, tx, tz, bitmap = null) {
   const cfg = LODS[lod];
   const s = cfg.samples;
+  if (bitmap) {
+    return { canvas: bitmap, grid, lod, samples: s, scale: cfg.scale, blocks: cfg.blocks, last: performance.now() };
+  }
   const cnv = document.createElement("canvas");
   cnv.width = s;
   cnv.height = s;
@@ -1582,16 +1678,10 @@ function createTile(grid, lod, tx, tz) {
 }
 
 function tintBiome(rgb, x, z, biomeId) {
-  const n = terrainNoise(x, z);
-  const soft = terrainNoise(x >> 2, z >> 2);
-  const water = biomeId === 0 || biomeId === 7 || (biomeId >= 44 && biomeId <= 50);
-  const snowy = biomeId === 10 || biomeId === 11 || biomeId === 12 || biomeId === 179 || biomeId === 180 || biomeId === 181;
-  const strength = water ? 8 : snowy ? 4 : 10;
-  const shade = Math.round((n - .5) * strength + (soft - .5) * (strength * .35));
-  const r = clamp(rgb[0] + shade, 0, 255);
-  const g = clamp(rgb[1] + shade, 0, 255);
-  const b = clamp(rgb[2] + shade, 0, 255);
-  return (r << 16) | (g << 8) | b;
+  // Amidst-style flat biome colors: render each biome as its solid color with no
+  // per-pixel noise/shading, so the map looks clean instead of grainy.
+  // (x, z, biomeId kept for signature compatibility with callers.)
+  return (rgb[0] << 16) | (rgb[1] << 8) | rgb[2];
 }
 
 function smoothTerrainNoise(x, z) {
@@ -1916,9 +2006,10 @@ async function loadWorld(options = {}) {
   els.dimension.value = dimension;
   state.loaded = false;
   resetUiCaches();
+  cancelWorldWorkerJobs();
+  cancelAllTileRequests();
   state.tiles.clear();
   state.tileQueue.clear();
-  state.pendingTiles.clear();
   tileBuildQueue.length = 0;
   state.structures = {};
   resetStructureStream();
@@ -1983,7 +2074,9 @@ async function fetchStructuresAround(cx, cz, radius, types = activeStructureType
   const x = Math.round(cx - radius);
   const z = Math.round(cz - radius);
   const size = radius * 2;
-  return workerRequest("structures", {
+  // withTimeout aborts (and cancels) a request that never answers, so the
+  // loader hides and the streamer's in-flight slot is always released.
+  return withTimeout(workerRequest("structures", {
     seed: state.seed,
     version: state.version,
     dimension: state.dimension,
@@ -1993,7 +2086,7 @@ async function fetchStructuresAround(cx, cz, radius, types = activeStructureType
     h: size,
     types: types.join(","),
     core: types.length === 0
-  });
+  }), STRUCT_REQUEST_TIMEOUT, "Structure request timed out");
 }
 
 // ─── Structure streaming ──────────────────────────────────────────────────────
@@ -2002,6 +2095,7 @@ function resetStructureStream() {
   state.structFetched = new Set();
   state.structSeen = {};
   structRegionQueue = [];
+  lastStructBulk = null;
   markerCache = null;
   lastMarkerSnapshot = [];
   frozenMarkerSnapshot = null;
@@ -2090,6 +2184,28 @@ function priorityStructureTypes(types) {
   return STRUCT_FAST_TYPES.filter(type => types.includes(type));
 }
 
+// Called when the map settles after a pan/zoom. Instead of waiting for the
+// debounced, region-by-region streamer, fetch the whole visible area in one
+// bulk request right away (fast types first) so locations show up immediately
+// on the new chunks. A guard skips refetching when the view barely moved.
+let lastStructBulk = null;
+function loadVisibleStructuresNow() {
+  if (!state.loaded || !dimensionCaps().structures || !activeStructureTypes().length) return;
+  const radius = visibleStructureRadius();
+  if (lastStructBulk && lastStructBulk.runId === state.runId) {
+    const moved = Math.hypot(state.viewX - lastStructBulk.x, state.viewZ - lastStructBulk.z);
+    // Still inside the area we just bulk-loaded → just top up the edges quietly.
+    if (moved < STRUCT_REGION * 0.5 && lastStructBulk.radius >= radius) {
+      scheduleStructureStream(80, true);
+      return;
+    }
+  }
+  lastStructBulk = { x: state.viewX, z: state.viewZ, radius, runId: state.runId };
+  markRegionsFetched(state.viewX, state.viewZ, radius);
+  startVisibleStructureBulk(state.runId, state.viewX, state.viewZ, radius);
+  scheduleStructureStream(80, true);
+}
+
 function fetchStructureBatch(runId, cx, cz, radius, types, primary) {
   if (runId !== state.runId || !state.loaded || !types.length) return;
   fetchStructuresAround(cx, cz, radius, types)
@@ -2103,7 +2219,7 @@ function fetchStructureBatch(runId, cx, cz, radius, types, primary) {
       requestRender();
     })
     .catch(err => {
-      if (runId !== state.runId) return;
+      if (runId !== state.runId || err?.name === "AbortError") return;
       if (primary) unmarkRegionsFetched(cx, cz, radius);
       console.warn(primary ? "Visible structures failed" : "Deferred structures failed", err);
       scheduleStructureStream(primary ? 260 : 520, true);
@@ -2165,11 +2281,16 @@ function drainStructureRegions() {
     structRegionInFlight++;
     fetchStructureRegion(job.rx, job.rz, runId)
       .catch(err => {
+        // World changed or request canceled: ignore quietly so stale/aborted
+        // requests never surface as real console errors.
+        if (runId !== state.runId || err?.name === "AbortError") return;
         state.structFetched.delete(job.key); // allow a later retry
         console.warn("Structure region failed", err);
       })
       .finally(() => {
-        structRegionInFlight--;
+        // Always release the slot (clamped so a late settle can't go negative),
+        // otherwise the streamer would stop fetching further locations.
+        structRegionInFlight = Math.max(0, structRegionInFlight - 1);
         drainStructureRegions();
       });
   }
@@ -2219,7 +2340,7 @@ function pruneFarStructures() {
 async function fetchStructureRegion(rx, rz, runId) {
   const types = activeStructureTypes();
   if (!types.length) return;
-  const data = await workerRequest("structures", {
+  const data = await withTimeout(workerRequest("structures", {
     seed: state.seed,
     version: state.version,
     dimension: state.dimension,
@@ -2228,7 +2349,7 @@ async function fetchStructureRegion(rx, rz, runId) {
     w: STRUCT_REGION,
     h: STRUCT_REGION,
     types: types.join(",")
-  });
+  }), STRUCT_REQUEST_TIMEOUT, "Structure region timed out");
   if (runId !== state.runId) return;
   const added = mergeStreamedStructures(data);
   if (added) {
@@ -2464,7 +2585,7 @@ function bindEvents() {
       if (performance.now() - lastMoveT < 70) startMomentum(panVel.x, panVel.z);
       else {
         unfreezeMarkers();
-        scheduleStructureStream(160, true);
+        loadVisibleStructuresNow();
       }
     } else {
       unfreezeMarkers();
@@ -2482,7 +2603,7 @@ function bindEvents() {
     panSample = null;
     canvas.classList.remove("dragging");
     unfreezeMarkers();
-    scheduleStructureStream(180, true);
+    loadVisibleStructuresNow();
   });
   canvas.addEventListener("pointermove", handlePointerMove);
   canvas.addEventListener("dblclick", () => {
