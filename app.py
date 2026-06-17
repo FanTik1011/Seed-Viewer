@@ -541,7 +541,7 @@ def all_structures():
 
     # Use min(len(tasks), 8) workers — more than 8 won't help for cubiomes
     if tasks:
-        with ThreadPoolExecutor(max_workers=min(len(tasks), 6)) as pool:
+        with ThreadPoolExecutor(max_workers=min(len(tasks), 10)) as pool:
             futures = {pool.submit(t): t.__name__ for t in tasks}
             for future in as_completed(futures):
                 try:

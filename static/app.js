@@ -5,7 +5,7 @@ const SAMPLE_SCALE = 8;
 const TILE_SAMPLES = TILE_BLOCKS / SAMPLE_SCALE;
 const MAX_TILE_CACHE = 650;
 const MAX_TILE_QUEUE = 360;
-const MAX_TILE_REQUESTS = Math.max(8, Math.min(24, (navigator.hardwareConcurrency || 4) * 3));
+const MAX_TILE_REQUESTS = Math.max(6, Math.min(14, (navigator.hardwareConcurrency || 4) * 2));
 const MAX_DRAW_TILES = 240;
 const TILE_REQUEST_TIMEOUT = 9000;
 const MAX_TILE_ATTEMPTS = 3;
@@ -25,15 +25,17 @@ const MARKER_MAX_ZOOM = 5;
 // merged into the running set, so markers accumulate instead of vanishing.
 const STRUCT_REGION = 3072;            // blocks per structure-fetch region
 const STRUCT_REGION_MARGIN = 1;        // pre-fetch this many regions beyond view
-const MAX_STRUCT_REGION_REQUESTS = 2;  // concurrent region fetches (keep workers free for tiles)
-const MAX_STREAM_MARKERS = 9000;       // soft cap on accumulated structures before pruning
-const STRUCT_KEEP_RADIUS = 5;          // regions around the view kept when pruning
+const MAX_STRUCT_REGION_REQUESTS = 3;  // concurrent region fetches (keeps workers free for tiles)
+const STRUCT_BULK_RADIUS = 4096;       // fast first pass around the current view
+const STRUCT_BULK_MAX_RADIUS = 8192;   // cap bulk scans so far-zoom views stay responsive
+const MAX_STREAM_MARKERS = 16000;      // soft cap on accumulated structures before pruning
+const STRUCT_KEEP_RADIUS = 8;          // regions around the view kept when pruning
 
-const WORKER_POOL_SIZE = Math.max(3, Math.min(8, navigator.hardwareConcurrency || 4));
+const WORKER_POOL_SIZE = Math.max(2, Math.min(5, Math.ceil((navigator.hardwareConcurrency || 4) / 2)));
 const VISIBLE_TILE_PRIORITY_BOOST = 1_000_000;
 const COARSE_TILE_PRIORITY_BOOST = 500_000;
-const TILE_BUILD_BATCH = 12;
-const TILE_BUILD_FRAME_BUDGET = 8;
+const TILE_BUILD_BATCH = 6;
+const TILE_BUILD_FRAME_BUDGET = 4;
 
 
 const LODS = [
@@ -479,13 +481,16 @@ const tileBuildQueue = [];
 const markerImageCache = new Map();
 const labelWidthCache = new Map();
 let markerCache = null;
+let lastMarkerSnapshot = [];
+let frozenMarkerSnapshot = null;
+let markerRefreshPending = false;
 let hudCache = "";
 let selectedPanelCache = "";
 let chunkPillCache = "";
-let structureWarmupTimer = 0;
 let structRegionQueue = [];
 let structRegionInFlight = 0;
 let sidebarRefreshTimer = 0;
+let structureStreamTimer = 0;
 
 
 function initWorker() {
@@ -691,12 +696,43 @@ function resetUiCaches() {
 }
 
 function invalidateMarkers() {
+  if (frozenMarkerSnapshot) {
+    markerRefreshPending = true;
+    return;
+  }
   markerCache = null;
 }
 
-function cancelStructureWarmup() {
-  clearTimeout(structureWarmupTimer);
-  structureWarmupTimer = 0;
+function freezeMarkers() {
+  if (frozenMarkerSnapshot) return;
+  frozenMarkerSnapshot = markerCache || lastMarkerSnapshot;
+  if (!frozenMarkerSnapshot || !frozenMarkerSnapshot.length) {
+    frozenMarkerSnapshot = buildMarkers();
+    markerCache = frozenMarkerSnapshot;
+    lastMarkerSnapshot = frozenMarkerSnapshot;
+  }
+}
+
+function unfreezeMarkers() {
+  if (!frozenMarkerSnapshot) return;
+  frozenMarkerSnapshot = null;
+  if (markerRefreshPending) {
+    markerRefreshPending = false;
+    markerCache = null;
+    visibleMarkers();
+    requestRender();
+  }
+}
+
+function scheduleStructureStream(delay = 240, reset = false) {
+  if (structureStreamTimer && !reset) return;
+  clearTimeout(structureStreamTimer);
+  if (!state.loaded) return;
+  structureStreamTimer = setTimeout(() => {
+    structureStreamTimer = 0;
+    if (!mapIsMoving()) streamStructures();
+    else scheduleStructureStream(260, true);
+  }, delay);
 }
 
 function cancelMomentum() {
@@ -718,6 +754,8 @@ function cancelZoomAnim() {
 function startZoomTo(target, sx = state.width / 2, sy = state.height / 2) {
   if (!state.loaded) return;
   cancelMomentum();
+  clearTimeout(structureStreamTimer);
+  freezeMarkers();
   const before = screenToWorld(sx, sy);
   state.zoomTarget = clamp(target, MIN_ZOOM, MAX_ZOOM);
   state.zoomAnchor = { sx, sy, wx: before.x, wz: before.z };
@@ -730,6 +768,8 @@ function animateZoom() {
   if (Math.abs(diff) <= Math.max(0.0008, t * 0.004)) {
     state.zoom = t;
     zoomRaf = 0;
+    unfreezeMarkers();
+    scheduleStructureStream(180, true);
   } else {
     state.zoom += diff * ZOOM_EASE;
     zoomRaf = requestAnimationFrame(animateZoom);
@@ -746,7 +786,11 @@ function animateZoom() {
 // Glide the view after a flick, with frame-rate-independent friction.
 function startMomentum(vx, vz) {
   cancelMomentum();
-  if (Math.hypot(vx, vz) < 0.015) return;
+  if (Math.hypot(vx, vz) < 0.015) {
+    unfreezeMarkers();
+    scheduleStructureStream(160, true);
+    return;
+  }
   let last = performance.now();
   const step = ts => {
     const dt = Math.min(40, ts - last);
@@ -758,8 +802,15 @@ function startMomentum(vx, vz) {
     vz *= f;
     scheduleUrlUpdate();
     requestRender();
-    momentumRaf = Math.hypot(vx, vz) > 0.01 ? requestAnimationFrame(step) : 0;
+    if (Math.hypot(vx, vz) > 0.01) {
+      momentumRaf = requestAnimationFrame(step);
+    } else {
+      momentumRaf = 0;
+      unfreezeMarkers();
+      scheduleStructureStream(160, true);
+    }
   };
+  freezeMarkers();
   momentumRaf = requestAnimationFrame(step);
 }
 
@@ -856,15 +907,15 @@ function render() {
   if (!mapIsMoving()) updateSelectedPanel();
   updateChunkPill();
   pumpTiles();
-  streamStructures();
+  if (!mapIsMoving()) scheduleStructureStream(320);
 }
 
 function prefetchAround(range) {
   // Warm a ring just outside the viewport so a pan reveals ready tiles.
   // queueTile prioritises by distance to view centre, so these naturally
-  // load after everything currently on screen. Allowed during motion too —
-  // the spare-capacity guard below keeps it from flooding the queue.
-  if (!state.showBiomes || !dimensionCaps().biomes) return;
+  // load after everything currently on screen. While moving, skip this so drag
+  // stays smooth; visible tiles are still queued by drawBiomes().
+  if (!state.showBiomes || !dimensionCaps().biomes || mapIsMoving()) return;
   if (state.pendingTiles.size > MAX_TILE_REQUESTS / 2 || state.tileQueue.size > MAX_TILE_QUEUE * .35) return;
   for (let tz = range.tzMin - PREFETCH_MARGIN; tz <= range.tzMax + PREFETCH_MARGIN; tz++) {
     for (let tx = range.txMin - PREFETCH_MARGIN; tx <= range.txMax + PREFETCH_MARGIN; tx++) {
@@ -1104,8 +1155,9 @@ function drawStructures() {
     drawMarkerClusters(onScreenMarkers, moving);
     return;
   }
-  const lite = moving || onScreenMarkers.length > MARKER_LITE_LIMIT;
-  for (const marker of onScreenMarkers) drawMarker(marker, lite, !lite);
+  const lite = onScreenMarkers.length > MARKER_LITE_LIMIT;
+  const allowLabel = !moving && onScreenMarkers.length <= MARKER_LABEL_LIMIT;
+  for (const marker of onScreenMarkers) drawMarker(marker, lite, allowLabel);
 }
 
 function drawMarkerClusters(markers, lite = false) {
@@ -1165,9 +1217,13 @@ function drawMarker(marker, lite = false, allowLabel = true) {
   const selected = isSelectedMarker(marker);
   // Cheap dot for dense / moving views. Selected + spawn always stay detailed.
   if (lite && !selected && marker.type !== "spawn") {
+    ctx.fillStyle = "rgba(5,8,10,.72)";
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 7, 0, Math.PI * 2);
+    ctx.fill();
     ctx.fillStyle = marker.color;
     ctx.beginPath();
-    ctx.arc(p.x, p.y, 4.5, 0, Math.PI * 2);
+    ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
     ctx.fill();
     return;
   }
@@ -1575,8 +1631,11 @@ function buildMarkers() {
 // dimension change — never per frame. Caching it removes the biggest source of
 // pan jank (a full rebuild + per-village biome lookup on every frame).
 function visibleMarkers() {
+  if (frozenMarkerSnapshot) return frozenMarkerSnapshot;
   if (markerCache) return markerCache;
+  if (mapIsMoving() && lastMarkerSnapshot.length) return lastMarkerSnapshot;
   markerCache = buildMarkers();
+  lastMarkerSnapshot = markerCache;
   return markerCache;
 }
 
@@ -1753,11 +1812,13 @@ async function toggleFeature(key, meta, available) {
   buildSidebar();
   requestRender();
   if (!next || !state.loaded || key === "spawn" || key === "Stronghold") return;
-  // Enabling a structure type: the already-visited regions were fetched without
-  // it, so clear the fetched set and let streaming re-pull them (dedup keeps the
-  // structures we already have, and adds the newly enabled type).
+  // Enabling a structure type: pull the current view in one bulk request first,
+  // then let the region streamer quietly fill the surrounding area.
   state.structFetched = new Set();
-  streamStructures();
+  const radius = visibleStructureRadius();
+  markRegionsFetched(state.viewX, state.viewZ, radius);
+  startVisibleStructureBulk(state.runId, state.viewX, state.viewZ, radius);
+  scheduleStructureStream(160, true);
 }
 
 function setAllFeatures(active) {
@@ -1768,7 +1829,10 @@ function setAllFeatures(active) {
   requestRender();
   if (active && state.loaded) {
     state.structFetched = new Set();
-    streamStructures();
+    const radius = visibleStructureRadius();
+    markRegionsFetched(state.viewX, state.viewZ, radius);
+    startVisibleStructureBulk(state.runId, state.viewX, state.viewZ, radius);
+    scheduleStructureStream(160, true);
   }
 }
 
@@ -1805,7 +1869,6 @@ async function loadWorld(options = {}) {
   }
   state.runId++;
   const runId = state.runId;
-  cancelStructureWarmup();
   state.seed = seed;
   state.version = version;
   state.dimension = dimension;
@@ -1841,22 +1904,11 @@ async function loadWorld(options = {}) {
     buildSidebar();
     scheduleUrlUpdate();
     requestRender();
-    // One fast request fills the spawn area instantly; mark those regions done
-    // so streaming only tops up the ring around the view and new regions as the
-    // map moves.
     const center = { x: state.viewX, z: state.viewZ };
-    fetchStructuresAround(center.x, center.z, INITIAL_SCAN_RADIUS)
-      .then(initial => {
-        if (runId !== state.runId) return;
-        if (mergeStreamedStructures(initial)) {
-          markRegionsFetched(center.x, center.z, INITIAL_SCAN_RADIUS);
-          invalidateMarkers();
-          buildSidebar();
-          requestRender();
-        }
-      })
-      .catch(err => console.warn("Initial structures failed", err))
-      .finally(() => { if (runId === state.runId) streamStructures(); });
+    const radius = Math.max(options.radius || INITIAL_SCAN_RADIUS, visibleStructureRadius());
+    markRegionsFetched(center.x, center.z, radius);
+    startVisibleStructureBulk(runId, center.x, center.z, radius);
+    scheduleStructureStream(180, true);
   } catch (err) {
     if (runId !== state.runId) return;
     console.error(err);
@@ -1881,7 +1933,10 @@ async function scanCurrentArea() {
     }
   }
   scheduleUrlUpdate();
-  streamStructures();
+  const radius = Math.max(MANUAL_SCAN_RADIUS, visibleStructureRadius());
+  markRegionsFetched(state.viewX, state.viewZ, radius);
+  startVisibleStructureBulk(state.runId, state.viewX, state.viewZ, radius);
+  scheduleStructureStream(180, true);
   showToast("Refreshing this area");
 }
 
@@ -1907,6 +1962,10 @@ function resetStructureStream() {
   state.structFetched = new Set();
   state.structSeen = {};
   structRegionQueue = [];
+  markerCache = null;
+  lastMarkerSnapshot = [];
+  frozenMarkerSnapshot = null;
+  markerRefreshPending = false;
 }
 
 // Mark every region overlapping a square (centre cx,cz; half-size radius) as
@@ -1918,6 +1977,16 @@ function markRegionsFetched(cx, cz, radius) {
   const rzMax = Math.floor((cz + radius) / STRUCT_REGION);
   for (let rz = rzMin; rz <= rzMax; rz++) {
     for (let rx = rxMin; rx <= rxMax; rx++) state.structFetched.add(`${rx},${rz}`);
+  }
+}
+
+function unmarkRegionsFetched(cx, cz, radius) {
+  const rxMin = Math.floor((cx - radius) / STRUCT_REGION);
+  const rxMax = Math.floor((cx + radius) / STRUCT_REGION);
+  const rzMin = Math.floor((cz - radius) / STRUCT_REGION);
+  const rzMax = Math.floor((cz + radius) / STRUCT_REGION);
+  for (let rz = rzMin; rz <= rzMax; rz++) {
+    for (let rx = rxMin; rx <= rxMax; rx++) state.structFetched.delete(`${rx},${rz}`);
   }
 }
 
@@ -1957,6 +2026,33 @@ function structRegionRange() {
     rzMin: Math.floor(tl.z / STRUCT_REGION) - STRUCT_REGION_MARGIN,
     rzMax: Math.floor(br.z / STRUCT_REGION) + STRUCT_REGION_MARGIN
   };
+}
+
+function visibleStructureRadius() {
+  const halfView = Math.max(state.width * state.zoom, state.height * state.zoom) / 2;
+  return Math.ceil(clamp(Math.max(STRUCT_BULK_RADIUS, halfView + STRUCT_REGION), STRUCT_BULK_RADIUS, STRUCT_BULK_MAX_RADIUS));
+}
+
+function startVisibleStructureBulk(runId, cx, cz, radius) {
+  const types = activeStructureTypes();
+  if (!types.length || !dimensionCaps().structures) return;
+  fetchStructuresAround(cx, cz, radius, types)
+    .then(data => {
+      if (runId !== state.runId || !state.loaded) return;
+      const added = mergeStreamedStructures(data);
+      if (added) {
+        pruneFarStructures();
+        invalidateMarkers();
+        scheduleSidebarRefresh();
+        requestRender();
+      }
+    })
+    .catch(err => {
+      if (runId !== state.runId) return;
+      unmarkRegionsFetched(cx, cz, radius);
+      console.warn("Visible structures failed", err);
+      scheduleStructureStream(300, true);
+    });
 }
 
 // Cheap: called every frame. Enqueues only regions never fetched, so once an
@@ -2095,63 +2191,6 @@ function scheduleSidebarRefresh() {
   sidebarRefreshTimer = setTimeout(() => {
     if (state.loaded) buildSidebar();
   }, 220);
-}
-
-async function fetchStructureAround(key, cx = state.viewX, cz = state.viewZ, radius = INITIAL_SCAN_RADIUS) {
-  const x = Math.round(cx - radius);
-  const z = Math.round(cz - radius);
-  const size = radius * 2;
-  return workerRequest("structureType", {
-    seed: state.seed,
-    version: state.version,
-    dimension: state.dimension,
-    structure: key,
-    x,
-    z,
-    w: size,
-    h: size
-  });
-}
-
-function structureLoadOrder(keys) {
-  const priority = [
-    "Village", "Desert_Temple", "Shipwreck", "Treasure", "Mineshaft",
-    "Ruined_Portal", "Monument", "Mansion", "Outpost", "Ancient_City",
-    "Geode", "Trail_Ruins", "Jungle_Temple", "Witch_Hut", "Igloo",
-    "Desert_Well", "Ocean_Ruins", "Trial_Chambers"
-  ];
-  return [...keys].sort((a, b) => {
-    const ai = priority.includes(a) ? priority.indexOf(a) : priority.length;
-    const bi = priority.includes(b) ? priority.indexOf(b) : priority.length;
-    return ai - bi;
-  });
-}
-
-function startStructureWarmup(runId, cx, cz, radius) {
-  cancelStructureWarmup();
-  const keys = structureLoadOrder(activeStructureTypes().filter(key => !featureDataLoaded(key)));
-  if (!keys.length) return;
-  structureWarmupTimer = setTimeout(() => warmStructureLayers(runId, keys, cx, cz, radius), 120);
-}
-
-async function warmStructureLayers(runId, keys, cx, cz, radius) {
-  for (const key of keys) {
-    if (runId !== state.runId || !state.loaded) return;
-    if (!state.vis[key] || featureDataLoaded(key)) continue;
-    try {
-      state.structures[key] = await fetchStructureAround(key, cx, cz, radius);
-      if (runId !== state.runId) return;
-      buildSidebar();
-      requestRender();
-      await wait(90);
-    } catch (err) {
-      console.warn(`${key} warmup failed`, err);
-    }
-  }
-}
-
-function wait(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 async function randomSeed() {
@@ -2352,6 +2391,7 @@ function bindEvents() {
     if (!state.loaded) return;
     cancelMomentum();
     cancelZoomAnim();
+    freezeMarkers();
     dragStart = { x: event.clientX, y: event.clientY };
     dragView = { x: state.viewX, z: state.viewZ };
     pointerMoved = false;
@@ -2367,6 +2407,12 @@ function bindEvents() {
       scheduleUrlUpdate();
       // Only glide if the pointer was still moving at release.
       if (performance.now() - lastMoveT < 70) startMomentum(panVel.x, panVel.z);
+      else {
+        unfreezeMarkers();
+        scheduleStructureStream(160, true);
+      }
+    } else {
+      unfreezeMarkers();
     }
     dragStart = null;
     panSample = null;
@@ -2375,6 +2421,13 @@ function bindEvents() {
   });
   canvas.addEventListener("pointerleave", () => {
     if (!dragStart) els.tooltip.classList.remove("visible");
+  });
+  canvas.addEventListener("pointercancel", () => {
+    dragStart = null;
+    panSample = null;
+    canvas.classList.remove("dragging");
+    unfreezeMarkers();
+    scheduleStructureStream(180, true);
   });
   canvas.addEventListener("pointermove", handlePointerMove);
   canvas.addEventListener("dblclick", () => {
