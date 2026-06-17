@@ -3,19 +3,25 @@ const TILE_BLOCKS = 256;
 const WORKER_URL = "/static/seed-worker.js";
 const SAMPLE_SCALE = 8;
 const TILE_SAMPLES = TILE_BLOCKS / SAMPLE_SCALE;
-const MAX_TILE_CACHE = 1200;
-const MAX_TILE_QUEUE = 900;
-const MAX_TILE_REQUESTS = Math.max(24, Math.min(64, (navigator.hardwareConcurrency || 4) * 6));
-const MAX_DRAW_TILES = 420;
+const MAX_TILE_CACHE = 650;
+const MAX_TILE_QUEUE = 360;
+const MAX_TILE_REQUESTS = Math.max(8, Math.min(24, (navigator.hardwareConcurrency || 4) * 3));
+const MAX_DRAW_TILES = 240;
 const TILE_REQUEST_TIMEOUT = 9000;
 const MAX_TILE_ATTEMPTS = 3;
 const TILE_RETRY_PENALTY = 4000;
 const PREFETCH_MARGIN = 1;
 
-const WORKER_POOL_SIZE = Math.max(4, Math.min(16, (navigator.hardwareConcurrency || 4)));
+// Marker rendering thresholds. Above LITE_LIMIT on-screen markers (or while the
+// map is moving) draw cheap dots; above LABEL_LIMIT stop drawing per-marker text.
+const MARKER_LITE_LIMIT = 200;
+const MARKER_LABEL_LIMIT = 50;
+
+const WORKER_POOL_SIZE = Math.max(3, Math.min(8, navigator.hardwareConcurrency || 4));
 const VISIBLE_TILE_PRIORITY_BOOST = 1_000_000;
 const COARSE_TILE_PRIORITY_BOOST = 500_000;
-const TILE_BUILD_BATCH = 24;
+const TILE_BUILD_BATCH = 12;
+const TILE_BUILD_FRAME_BUDGET = 8;
 
 
 const LODS = [
@@ -30,7 +36,8 @@ const MAX_ZOOM = 1.9;
 const DEFAULT_ZOOM = 1.9;
 const ZOOM_EASE = 0.25;
 const PAN_FRICTION = 0.9;
-const INITIAL_SCAN_RADIUS = 6144;
+const INITIAL_SCAN_RADIUS = 3072;
+const MANUAL_SCAN_RADIUS = 4096;
 const MAP_BG = "#07110f";
 const EMPTY_TILE_COLORS = ["#0c1915", "#101e19"];
 const UNKNOWN_BIOME_RGB = [38, 45, 41];
@@ -131,30 +138,64 @@ const VILLAGE_LABEL_RULES = [
   { label:"Plains Village", match: name => /plains|meadow|sunflower/i.test(name) }
 ];
 
+const ICON_ASSET_BASE = "/static/icons/";
+const ICON_ASSETS = {
+  spawn: "spawn-point.svg",
+  Stronghold: "stronghold.svg",
+  Monument: "monument.svg",
+  Mansion: "mansion.svg",
+  Outpost: "outpost.svg",
+  Ancient_City: "ancient-city.svg",
+  Trial_Chambers: "trial-chamber.svg",
+  Desert_Temple: "desert-temple.svg",
+  Jungle_Temple: "jungle-temple.svg",
+  Igloo: "igloo.svg",
+  Shipwreck: "shipwreck.svg",
+  Ruined_Portal: "ruined-portal.svg",
+  Ruined_Portal_Nether: "ruined-portal.svg",
+  Treasure: "treasure.svg",
+  Mineshaft: "mineshaft.svg",
+  Desert_Well: "desert-well.svg",
+  Geode: "geode.svg",
+  Trail_Ruins: "trail-ruins.svg",
+  Slime_Chunk: "slime-chunk.svg",
+  Dungeon: "dungeon.svg",
+  Fossil: "fossil.svg",
+  Cave: "cave.svg",
+  Ravine: "ravine.svg",
+  Lava_Pool: "lava-pool.svg",
+  Apple: "apple.svg",
+  Ore_Veins: "ore-veins.svg"
+};
+
+function iconAsset(key) {
+  return ICON_ASSETS[key] ? `${ICON_ASSET_BASE}${ICON_ASSETS[key]}` : "";
+}
+
 const STRUCT_META = {
-  spawn: { label:"Spawn Point", icon:"home", color:"#edf3ee" },
-  Stronghold: { label:"Stronghold", icon:"diamond", color:"#b99cff" },
+  spawn: { label:"Spawn Point", icon:"home", asset:iconAsset("spawn"), color:"#edf3ee" },
+  Stronghold: { label:"Stronghold", icon:"diamond", asset:iconAsset("Stronghold"), color:"#b99cff" },
   Village: { label:"Village", icon:"village", color:"#f2b84b" },
-  Monument: { label:"Monument", icon:"wave", color:"#5cc8f2" },
-  Mansion: { label:"Mansion", icon:"tower", color:"#f06a65" },
-  Outpost: { label:"Outpost", icon:"axe", color:"#fb9657" },
-  Ancient_City: { label:"Ancient City", icon:"ruin", color:"#6aa9ff" },
-  Trial_Chambers: { label:"Trial Chamber", icon:"shield", color:"#57d68d" },
+  Monument: { label:"Monument", icon:"wave", asset:iconAsset("Monument"), color:"#5cc8f2" },
+  Mansion: { label:"Mansion", icon:"tower", asset:iconAsset("Mansion"), color:"#f06a65" },
+  Outpost: { label:"Outpost", icon:"axe", asset:iconAsset("Outpost"), color:"#fb9657" },
+  Ancient_City: { label:"Ancient City", icon:"ruin", asset:iconAsset("Ancient_City"), color:"#6aa9ff" },
+  Trial_Chambers: { label:"Trial Chamber", icon:"shield", asset:iconAsset("Trial_Chambers"), color:"#57d68d" },
   Fortress: { label:"Fortress", icon:"flame", color:"#ef5c55" },
   Bastion: { label:"Bastion", icon:"key", color:"#d24b42" },
-  Desert_Temple: { label:"Desert Temple", icon:"temple", color:"#e8ca68" },
-  Jungle_Temple: { label:"Jungle Temple", icon:"temple", color:"#71b85e" },
+  Desert_Temple: { label:"Desert Temple", icon:"temple", asset:iconAsset("Desert_Temple"), color:"#e8ca68" },
+  Jungle_Temple: { label:"Jungle Temple", icon:"temple", asset:iconAsset("Jungle_Temple"), color:"#71b85e" },
   Witch_Hut: { label:"Witch Hut", icon:"hut", color:"#8ac177" },
-  Igloo: { label:"Igloo", icon:"snow", color:"#dce8f4" },
+  Igloo: { label:"Igloo", icon:"snow", asset:iconAsset("Igloo"), color:"#dce8f4" },
   Ocean_Ruins: { label:"Ocean Ruins", icon:"wave", color:"#4fc8df" },
-  Shipwreck: { label:"Shipwreck", icon:"ship", color:"#57c7d9" },
-  Ruined_Portal: { label:"Ruined Portal", icon:"portal", color:"#b56cff" },
-  Ruined_Portal_Nether: { label:"Nether Portal", icon:"portal", color:"#c46cff" },
-  Treasure: { label:"Treasure", icon:"chest", color:"#ffd45c" },
-  Mineshaft: { label:"Mineshaft", icon:"mine", color:"#c69a5b" },
-  Desert_Well: { label:"Desert Well", icon:"temple", color:"#e4c26e" },
-  Geode: { label:"Geode", icon:"geode", color:"#bb9cff" },
-  Trail_Ruins: { label:"Trail Ruins", icon:"ruin", color:"#c99662" },
+  Shipwreck: { label:"Shipwreck", icon:"ship", asset:iconAsset("Shipwreck"), color:"#57c7d9" },
+  Ruined_Portal: { label:"Ruined Portal", icon:"portal", asset:iconAsset("Ruined_Portal"), color:"#b56cff" },
+  Ruined_Portal_Nether: { label:"Nether Portal", icon:"portal", asset:iconAsset("Ruined_Portal_Nether"), color:"#c46cff" },
+  Treasure: { label:"Treasure", icon:"chest", asset:iconAsset("Treasure"), color:"#ffd45c" },
+  Mineshaft: { label:"Mineshaft", icon:"mine", asset:iconAsset("Mineshaft"), color:"#c69a5b" },
+  Desert_Well: { label:"Desert Well", icon:"temple", asset:iconAsset("Desert_Well"), color:"#e4c26e" },
+  Geode: { label:"Geode", icon:"geode", asset:iconAsset("Geode"), color:"#bb9cff" },
+  Trail_Ruins: { label:"Trail Ruins", icon:"ruin", asset:iconAsset("Trail_Ruins"), color:"#c99662" },
   End_City: { label:"End City", icon:"tower", color:"#d9c8ff" },
   End_Gateway: { label:"End Gateway", icon:"portal", color:"#bfb3ff" },
   End_Island: { label:"End Island", icon:"diamond", color:"#efe5b4" }
@@ -162,10 +203,10 @@ const STRUCT_META = {
 
 const FEATURE_CATALOG = [
   { key:"spawn", supported:true },
-  { key:"Slime_Chunk", label:"Slime Chunk", icon:"slime", color:"#78dc67" },
+  { key:"Slime_Chunk", label:"Slime Chunk", icon:"slime", asset:iconAsset("Slime_Chunk"), color:"#78dc67" },
   { key:"Village", supported:true },
   { key:"Ancient_City", supported:true },
-  { key:"Dungeon", label:"Dungeon", icon:"ruin", color:"#9f8f7a" },
+  { key:"Dungeon", label:"Dungeon", icon:"ruin", asset:iconAsset("Dungeon"), color:"#9f8f7a" },
   { key:"Stronghold", supported:true },
   { key:"Mansion", supported:true },
   { key:"Monument", supported:true },
@@ -179,13 +220,13 @@ const FEATURE_CATALOG = [
   { key:"Shipwreck", supported:true },
   { key:"Igloo", supported:true },
   { key:"Ocean_Ruins", supported:true },
-  { key:"Fossil", label:"Fossil", icon:"fossil", color:"#d4c0a4" },
-  { key:"Cave", label:"Cave", icon:"cave", color:"#9aa2b7" },
-  { key:"Ravine", label:"Ravine", icon:"cave", color:"#bd8c64" },
-  { key:"Lava_Pool", label:"Lava Pool", icon:"lava", color:"#ff7047" },
+  { key:"Fossil", label:"Fossil", icon:"fossil", asset:iconAsset("Fossil"), color:"#d4c0a4" },
+  { key:"Cave", label:"Cave", icon:"cave", asset:iconAsset("Cave"), color:"#9aa2b7" },
+  { key:"Ravine", label:"Ravine", icon:"cave", asset:iconAsset("Ravine"), color:"#bd8c64" },
+  { key:"Lava_Pool", label:"Lava Pool", icon:"lava", asset:iconAsset("Lava_Pool"), color:"#ff7047" },
   { key:"Geode", supported:true },
-  { key:"Apple", label:"Apple", icon:"apple", color:"#ff7373" },
-  { key:"Ore_Veins", label:"Ore Veins", icon:"mine", color:"#9fb6c8" },
+  { key:"Apple", label:"Apple", icon:"apple", asset:iconAsset("Apple"), color:"#ff7373" },
+  { key:"Ore_Veins", label:"Ore Veins", icon:"mine", asset:iconAsset("Ore_Veins"), color:"#9fb6c8" },
   { key:"Desert_Well", supported:true },
   { key:"Trail_Ruins", supported:true },
   { key:"Trial_Chambers", supported:true }
@@ -327,6 +368,7 @@ const OVERWORLD_FEATURES = new Set(["spawn","Stronghold","Village","Monument","M
 const NETHER_FEATURES = new Set(["Fortress","Bastion","Ruined_Portal_Nether"]);
 const END_FEATURES = new Set(["End_City","End_Gateway","End_Island"]);
 const OVERWORLD_BASE_FEATURES = new Set(["spawn","Stronghold","Village","Monument","Mansion","Outpost","Desert_Temple","Jungle_Temple","Witch_Hut","Igloo","Ocean_Ruins","Shipwreck","Treasure","Mineshaft","Desert_Well"]);
+const DEFAULT_DISABLED_FEATURES = new Set(["Ocean_Ruins", "Trial_Chambers", "Mineshaft"]);
 
 const canvas = document.getElementById("map-canvas");
 const ctx = canvas.getContext("2d", { alpha: false });
@@ -397,7 +439,7 @@ const state = {
   cursor: { x: 0, z: 0 },
   selected: null,
   capabilities: null,
-  vis: Object.fromEntries(Object.keys(STRUCT_META).map(k => [k, true]))
+  vis: Object.fromEntries(Object.keys(STRUCT_META).map(k => [k, !DEFAULT_DISABLED_FEATURES.has(k)]))
 };
 
 let raf = 0;
@@ -419,6 +461,12 @@ let autoLoadTimer = 0;
 let tileBuildPending = false;
 let tilePumpPending = false;
 const tileBuildQueue = [];
+const markerImageCache = new Map();
+let markerCache = null;
+let hudCache = "";
+let selectedPanelCache = "";
+let chunkPillCache = "";
+let structureWarmupTimer = 0;
 
 
 function initWorker() {
@@ -484,7 +532,20 @@ async function directRequest(type, payload = {}) {
       w: String(payload.w),
       h: String(payload.h)
     });
+    if (payload.types != null) params.set("types", payload.types);
     url = `${API}/api/all_structures?${params}`;
+  } else if (type === "structureType") {
+    const params = new URLSearchParams({
+      seed: payload.seed,
+      version: payload.version,
+      dimension: payload.dimension || "overworld",
+      type: payload.structure,
+      x: String(payload.x),
+      z: String(payload.z),
+      w: String(payload.w),
+      h: String(payload.h)
+    });
+    url = `${API}/api/structures?${params}`;
   } else if (type === "randomSeed") {
     url = `${API}/api/random_seed`;
   } else if (type === "searchSeeds") {
@@ -511,9 +572,14 @@ function setIcon(id, name, label) {
   el.innerHTML = ICONS[name] + (label ? `<span>${label}</span>` : "");
 }
 
+function iconMarkup(iconName, asset = "") {
+  if (asset) return `<img src="${asset}" alt="" loading="lazy" decoding="async">`;
+  return ICONS[iconName] || ICONS.target;
+}
+
 function bootIcons() {
-  document.getElementById("brand-icon").innerHTML = ICONS.map;
-  document.getElementById("empty-icon").innerHTML = ICONS.map;
+  document.getElementById("brand-icon").innerHTML = iconMarkup("map", iconAsset("spawn"));
+  document.getElementById("empty-icon").innerHTML = iconMarkup("map", iconAsset("spawn"));
   setIcon("random-btn", "shuffle", "Random");
   setIcon("scan-btn", "refresh", "Scan area");
   setIcon("copy-seed-btn", "copy", "Copy seed");
@@ -584,9 +650,36 @@ function isFeatureAvailable(key, version = state.version, dimension = state.dime
   return (VERSION_EXTRAS[version] || new Set()).has(key);
 }
 
+function activeStructureTypes() {
+  return Object.keys(STRUCT_META)
+    .filter(key => key !== "spawn" && key !== "Stronghold")
+    .filter(key => state.vis[key] && isFeatureAvailable(key));
+}
+
+function featureDataLoaded(key) {
+  if (key === "spawn") return !!state.structures.spawn;
+  if (key === "Stronghold") return Array.isArray(state.structures.strongholds);
+  return Array.isArray(state.structures[key]);
+}
+
 function requestRender() {
   if (raf) return;
   raf = requestAnimationFrame(render);
+}
+
+function resetUiCaches() {
+  hudCache = "";
+  selectedPanelCache = "";
+  chunkPillCache = "";
+}
+
+function invalidateMarkers() {
+  markerCache = null;
+}
+
+function cancelStructureWarmup() {
+  clearTimeout(structureWarmupTimer);
+  structureWarmupTimer = 0;
 }
 
 function cancelMomentum() {
@@ -742,7 +835,7 @@ function render() {
   drawSelection();
   drawStructures();
   updateHud();
-  updateSelectedPanel();
+  if (!mapIsMoving()) updateSelectedPanel();
   updateChunkPill();
   pumpTiles();
 }
@@ -750,8 +843,10 @@ function render() {
 function prefetchAround(range) {
   // Warm a ring just outside the viewport so a pan reveals ready tiles.
   // queueTile prioritises by distance to view centre, so these naturally
-  // load after everything currently on screen.
+  // load after everything currently on screen. Allowed during motion too —
+  // the spare-capacity guard below keeps it from flooding the queue.
   if (!state.showBiomes || !dimensionCaps().biomes) return;
+  if (state.pendingTiles.size > MAX_TILE_REQUESTS / 2 || state.tileQueue.size > MAX_TILE_QUEUE * .35) return;
   for (let tz = range.tzMin - PREFETCH_MARGIN; tz <= range.tzMax + PREFETCH_MARGIN; tz++) {
     for (let tx = range.txMin - PREFETCH_MARGIN; tx <= range.txMax + PREFETCH_MARGIN; tx++) {
       if (tx >= range.txMin && tx <= range.txMax && tz >= range.tzMin && tz <= range.tzMax) continue;
@@ -761,7 +856,7 @@ function prefetchAround(range) {
 }
 
 function queueCoarseFallbacks(range) {
-  if (!state.showBiomes || !dimensionCaps().biomes || range.lod >= LODS.length - 1) return;
+  if (!state.showBiomes || !dimensionCaps().biomes || range.lod >= LODS.length - 1 || mapIsMoving()) return;
   const startX = range.txMin * range.blocks;
   const endX = (range.txMax + 1) * range.blocks - 1;
   const startZ = range.tzMin * range.blocks;
@@ -778,6 +873,10 @@ function queueCoarseFallbacks(range) {
       }
     }
   }
+}
+
+function mapIsMoving() {
+  return !!(dragStart || momentumRaf || zoomRaf);
 }
 
 
@@ -971,7 +1070,17 @@ function drawStructures() {
     drawMarkerClusters(all);
     return;
   }
-  for (const marker of all) drawMarker(marker);
+  // Count on-screen markers so we can switch to cheap rendering when the view
+  // is dense or moving. Full markers (shadow + 3 rounded rects + glyph + label)
+  // are fine for a handful but murder framerate by the hundreds during a pan.
+  let onScreen = 0;
+  for (const m of all) {
+    const p = worldToScreen(m.x, m.z);
+    if (p.x >= -70 && p.y >= -70 && p.x <= state.width + 70 && p.y <= state.height + 70) onScreen++;
+  }
+  const lite = mapIsMoving() || onScreen > MARKER_LITE_LIMIT;
+  const showLabels = !lite && onScreen <= MARKER_LABEL_LIMIT;
+  for (const marker of all) drawMarker(marker, lite, showLabels);
 }
 
 function drawMarkerClusters(markers) {
@@ -1024,14 +1133,22 @@ function drawClusterBadge(group) {
   ctx.restore();
 }
 
-function drawMarker(marker) {
+function drawMarker(marker, lite = false, allowLabel = true) {
   const p = worldToScreen(marker.x, marker.z);
   if (p.x < -70 || p.y < -70 || p.x > state.width + 70 || p.y > state.height + 70) return;
+  const selected = isSelectedMarker(marker);
+  // Cheap dot for dense / moving views. Selected + spawn always stay detailed.
+  if (lite && !selected && marker.type !== "spawn") {
+    ctx.fillStyle = marker.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+    return;
+  }
   const color = marker.color;
   const scale = state.zoom <= 2 ? 1.08 : state.zoom <= 6 ? .96 : .82;
   const size = 27 * scale;
   const half = size / 2;
-  const selected = isSelectedMarker(marker);
   ctx.save();
   ctx.translate(p.x, p.y);
   ctx.shadowColor = "rgba(0,0,0,.48)";
@@ -1050,9 +1167,9 @@ function drawMarker(marker) {
   roundRect(-half + 4, -half + 4, size - 8, size - 8, 3, true, false);
   ctx.fillStyle = "rgba(255,255,255,.22)";
   ctx.fillRect(-half + 5, -half + 5, size - 10, 2);
-  drawMarkerGlyph(marker.icon, "#07100d", size);
+  if (!drawMarkerAsset(marker.asset, size)) drawMarkerGlyph(marker.icon, "#07100d", size);
   ctx.restore();
-  if (selected || marker.type === "spawn" || state.zoom <= 2.5) drawMarkerLabel(marker, p, color);
+  if (selected || marker.type === "spawn" || (allowLabel && state.zoom <= 2.5)) drawMarkerLabel(marker, p, color);
 }
 
 function isSelectedMarker(marker) {
@@ -1090,6 +1207,26 @@ function drawMarkerGlyph(icon, color, size) {
       ctx.fillRect(start + x * cell, start + y * cell, cell * .88, cell * .88);
     }
   }
+}
+
+function drawMarkerAsset(asset, size) {
+  if (!asset) return false;
+  const img = markerImage(asset);
+  if (!img.complete || !img.naturalWidth) return false;
+  const inset = Math.max(1, size * .08);
+  ctx.drawImage(img, -size / 2 + inset, -size / 2 + inset, size - inset * 2, size - inset * 2);
+  return true;
+}
+
+function markerImage(asset) {
+  let img = markerImageCache.get(asset);
+  if (img) return img;
+  img = new Image();
+  img.decoding = "async";
+  img.onload = requestRender;
+  img.src = asset;
+  markerImageCache.set(asset, img);
+  return img;
 }
 
 function line(points) {
@@ -1269,7 +1406,8 @@ function buildQueuedTiles() {
   tileBuildPending = false;
   let processed = 0;
   let built = 0;
-  while (tileBuildQueue.length && processed < TILE_BUILD_BATCH) {
+  const deadline = performance.now() + TILE_BUILD_FRAME_BUDGET;
+  while (tileBuildQueue.length && processed < TILE_BUILD_BATCH && performance.now() < deadline) {
     const job = tileBuildQueue.shift();
     processed++;
     if (job.runId === state.runId && job.grid) {
@@ -1280,6 +1418,9 @@ function buildQueuedTiles() {
     state.pendingTiles.delete(job.key);
   }
   updateChunkPill();
+  // Village labels depend on biome tiles; refresh them once tiles settle, but
+  // never mid-pan (that would rebuild the marker list during a drag).
+  if (built && !mapIsMoving()) invalidateMarkers();
   if (processed) requestRender();
   pumpTiles();
   if (tileBuildQueue.length) scheduleTileBuild();
@@ -1370,7 +1511,7 @@ function markerMetaFor(key, point) {
   return { ...meta, label: villageLabelAt(point.x, point.z) };
 }
 
-function visibleMarkers() {
+function buildMarkers() {
   const markers = [];
   if (state.vis.spawn && isFeatureAvailable("spawn") && state.structures.spawn) {
     markers.push({ type:"spawn", ...state.structures.spawn, ...STRUCT_META.spawn });
@@ -1390,6 +1531,15 @@ function visibleMarkers() {
   return markers;
 }
 
+// The marker set only changes when structures, layer visibility, version or
+// dimension change — never per frame. Caching it removes the biggest source of
+// pan jank (a full rebuild + per-village biome lookup on every frame).
+function visibleMarkers() {
+  if (markerCache) return markerCache;
+  markerCache = buildMarkers();
+  return markerCache;
+}
+
 function nearestMarker(mx, my) {
   let best = null;
   let bestDist = 18;
@@ -1405,9 +1555,13 @@ function nearestMarker(mx, my) {
 }
 
 function updateHud() {
+  const zoomText = state.zoom.toFixed(state.zoom < 10 ? 1 : 0);
+  const key = `${state.cursor.x}|${state.cursor.z}|${zoomText}`;
+  if (key === hudCache) return;
+  hudCache = key;
   els.coordX.textContent = state.cursor.x;
   els.coordZ.textContent = state.cursor.z;
-  els.zoomLabel.textContent = state.zoom.toFixed(state.zoom < 10 ? 1 : 0);
+  els.zoomLabel.textContent = zoomText;
   if (els.zoomRange && document.activeElement !== els.zoomRange) {
     els.zoomRange.value = String(zoomToSlider(state.zoom));
   }
@@ -1415,8 +1569,13 @@ function updateHud() {
 
 function updateChunkPill() {
   const n = state.pendingTiles.size + state.tileQueue.size;
-  els.chunkPill.classList.toggle("visible", state.loaded && n > 0);
-  els.chunkLabel.textContent = n === 1 ? "Loading 1 chunk" : `Loading ${n} chunks`;
+  const visible = state.loaded && n > 0;
+  const text = n === 1 ? "Loading 1 chunk" : `Loading ${n} chunks`;
+  const key = `${visible}|${text}`;
+  if (key === chunkPillCache) return;
+  chunkPillCache = key;
+  els.chunkPill.classList.toggle("visible", visible);
+  els.chunkLabel.textContent = text;
 }
 
 function biomeAt(wx, wz) {
@@ -1440,6 +1599,7 @@ function selectLocation(location, screenPoint = null) {
     type: location.type || "point",
     label: location.label || "Selected point",
     icon: location.icon || "target",
+    asset: location.asset || "",
     color: location.color || "#edf3ee",
     x: Math.round(location.x),
     z: Math.round(location.z),
@@ -1465,13 +1625,17 @@ function updateSelectedPanel() {
   const chunkX = Math.floor(point.x / 16);
   const chunkZ = Math.floor(point.z / 16);
   const label = point.ring ? `${point.label} ring ${point.ring}` : point.label;
+  const biome = state.loaded ? biomeAt(point.x, point.z) : "-";
+  const key = `${point.type}|${label}|${point.icon}|${point.asset || ""}|${point.color}|${point.x}|${point.z}|${chunkX}|${chunkZ}|${biome}`;
+  if (key === selectedPanelCache) return;
+  selectedPanelCache = key;
   els.selectedIcon.style.setProperty("--icon", point.color);
-  els.selectedIcon.innerHTML = ICONS[point.icon] || ICONS.target;
+  els.selectedIcon.innerHTML = iconMarkup(point.icon, point.asset);
   els.selectedLabel.textContent = label;
   els.selectedX.textContent = point.x;
   els.selectedZ.textContent = point.z;
   els.selectedChunk.textContent = `${chunkX}, ${chunkZ}`;
-  els.selectedBiome.textContent = state.loaded ? biomeAt(point.x, point.z) : "-";
+  els.selectedBiome.textContent = biome;
   updatePopover();
 }
 
@@ -1501,7 +1665,7 @@ function updatePopover() {
   const chunkZ = Math.floor(point.z / 16);
   const label = point.ring ? `${point.label} ring ${point.ring}` : point.label;
   els.popoverIcon.style.setProperty("--icon", point.color);
-  els.popoverIcon.innerHTML = ICONS[point.icon] || ICONS.target;
+  els.popoverIcon.innerHTML = iconMarkup(point.icon, point.asset);
   els.popoverLabel.textContent = label;
   els.popoverCoords.textContent = `${point.x}, ${point.z}`;
   els.popoverChunk.textContent = `${chunkX}, ${chunkZ}`;
@@ -1509,6 +1673,7 @@ function updatePopover() {
 }
 
 function buildSidebar() {
+  invalidateMarkers();
   els.layerList.innerHTML = "";
   els.layerList.append(
     makeLayerRow("layers", "Biomes", "#57d68d", null, state.showBiomes, () => {
@@ -1530,19 +1695,38 @@ function buildSidebar() {
     const meta = feature.supported ? STRUCT_META[key] : feature;
     if (!meta) continue;
     const available = feature.supported && isFeatureAvailable(key);
-    const count = structureCount(key);
+    const hasData = featureDataLoaded(key);
+    const count = hasData ? structureCount(key) : null;
     if (available) total += count;
-    els.structList.append(makeLayerRow(meta.icon, meta.label, meta.color, available ? count : null, available ? state.vis[key] : false, () => {
-      if (!available) {
-        showToast(`${meta.label} is not available for ${state.version} ${state.dimension}`);
-        return;
-      }
-      state.vis[key] = !state.vis[key];
-      buildSidebar();
-      requestRender();
-    }, { disabled: !available }));
+    els.structList.append(makeLayerRow(meta.icon, meta.label, meta.color, available ? count : null, available ? state.vis[key] : false, () => toggleFeature(key, meta, available), { disabled: !available, asset: meta.asset }));
   }
   els.structTotal.textContent = total;
+}
+
+async function toggleFeature(key, meta, available) {
+  if (!available) {
+    showToast(`${meta.label} is not available for ${state.version} ${state.dimension}`);
+    return;
+  }
+  const next = !state.vis[key];
+  state.vis[key] = next;
+  buildSidebar();
+  requestRender();
+  if (!next || !state.loaded || featureDataLoaded(key) || key === "spawn" || key === "Stronghold") return;
+
+  showLoader("Loading layer", `Finding ${meta.label} near current area...`);
+  try {
+    state.structures[key] = await fetchStructureAround(key);
+    buildSidebar();
+    requestRender();
+  } catch (err) {
+    console.error(err);
+    state.vis[key] = false;
+    buildSidebar();
+    showToast(`${meta.label} load failed`);
+  } finally {
+    hideLoader();
+  }
 }
 
 function setAllFeatures(active) {
@@ -1551,6 +1735,25 @@ function setAllFeatures(active) {
   }
   buildSidebar();
   requestRender();
+  if (active && state.loaded) loadMissingVisibleFeatures();
+}
+
+async function loadMissingVisibleFeatures() {
+  const missing = activeStructureTypes().filter(key => !featureDataLoaded(key));
+  if (!missing.length) return;
+  showLoader("Loading layers", `Finding ${missing.length} structure layers...`);
+  try {
+    for (const key of missing) {
+      state.structures[key] = await fetchStructureAround(key);
+      buildSidebar();
+      requestRender();
+    }
+  } catch (err) {
+    console.error(err);
+    showToast("Some layers failed to load");
+  } finally {
+    hideLoader();
+  }
 }
 
 function structureCount(key) {
@@ -1567,7 +1770,7 @@ function makeLayerRow(iconName, label, color, count, active, onClick, options = 
   if (options.disabled) row.setAttribute("aria-disabled", "true");
   row.style.setProperty("--icon", color);
   row.innerHTML = `
-    <span class="layer-icon">${ICONS[iconName] || ICONS.target}</span>
+    <span class="layer-icon">${iconMarkup(iconName, options.asset)}</span>
     <span class="layer-label">${label}</span>
     ${count == null ? `<span class="count muted">-</span>` : `<span class="count">${count}</span>`}
     <span class="switch ${active ? "on" : ""}"></span>
@@ -1586,6 +1789,7 @@ async function loadWorld(options = {}) {
   }
   state.runId++;
   const runId = state.runId;
+  cancelStructureWarmup();
   state.seed = seed;
   state.version = version;
   state.dimension = dimension;
@@ -1593,6 +1797,7 @@ async function loadWorld(options = {}) {
   els.version.value = version;
   els.dimension.value = dimension;
   state.loaded = false;
+  resetUiCaches();
   state.tiles.clear();
   state.tileQueue.clear();
   state.pendingTiles.clear();
@@ -1600,9 +1805,9 @@ async function loadWorld(options = {}) {
   state.structures = {};
   state.selected = null;
   els.empty.classList.add("hidden");
-  showLoader("Loading world", `Finding ${dimension} structures...`);
+  showLoader("Loading seed", "Preparing fast map preview...");
   try {
-    const data = await fetchStructuresAround(0, 0, options.radius || INITIAL_SCAN_RADIUS);
+    const data = await fetchStructuresAround(0, 0, options.radius || INITIAL_SCAN_RADIUS, []);
     if (runId !== state.runId) return;
     state.structures = data;
     state.loaded = true;
@@ -1618,6 +1823,7 @@ async function loadWorld(options = {}) {
     buildSidebar();
     scheduleUrlUpdate();
     requestRender();
+    startStructureWarmup(runId, state.viewX, state.viewZ, options.radius || INITIAL_SCAN_RADIUS);
   } catch (err) {
     if (runId !== state.runId) return;
     console.error(err);
@@ -1633,13 +1839,15 @@ async function scanCurrentArea() {
     showToast("Load a seed first");
     return;
   }
-  showLoader("Scanning area", `Refreshing ${state.dimension} structures near map center...`);
+  showLoader("Scanning area", "Refreshing map preview...");
   try {
-    const data = await fetchStructuresAround(state.viewX, state.viewZ, INITIAL_SCAN_RADIUS);
+    const runId = state.runId;
+    const data = await fetchStructuresAround(state.viewX, state.viewZ, MANUAL_SCAN_RADIUS, []);
     state.structures = data;
     buildSidebar();
     scheduleUrlUpdate();
     requestRender();
+    startStructureWarmup(runId, state.viewX, state.viewZ, MANUAL_SCAN_RADIUS);
   } catch (err) {
     console.error(err);
     showToast("Area scan failed");
@@ -1648,7 +1856,7 @@ async function scanCurrentArea() {
   }
 }
 
-async function fetchStructuresAround(cx, cz, radius) {
+async function fetchStructuresAround(cx, cz, radius, types = activeStructureTypes()) {
   const x = Math.round(cx - radius);
   const z = Math.round(cz - radius);
   const size = radius * 2;
@@ -1659,8 +1867,66 @@ async function fetchStructuresAround(cx, cz, radius) {
     x,
     z,
     w: size,
+    h: size,
+    types: types.join(",")
+  });
+}
+
+async function fetchStructureAround(key, cx = state.viewX, cz = state.viewZ, radius = INITIAL_SCAN_RADIUS) {
+  const x = Math.round(cx - radius);
+  const z = Math.round(cz - radius);
+  const size = radius * 2;
+  return workerRequest("structureType", {
+    seed: state.seed,
+    version: state.version,
+    dimension: state.dimension,
+    structure: key,
+    x,
+    z,
+    w: size,
     h: size
   });
+}
+
+function structureLoadOrder(keys) {
+  const priority = [
+    "Village", "Desert_Temple", "Shipwreck", "Treasure", "Mineshaft",
+    "Ruined_Portal", "Monument", "Mansion", "Outpost", "Ancient_City",
+    "Geode", "Trail_Ruins", "Jungle_Temple", "Witch_Hut", "Igloo",
+    "Desert_Well", "Ocean_Ruins", "Trial_Chambers"
+  ];
+  return [...keys].sort((a, b) => {
+    const ai = priority.includes(a) ? priority.indexOf(a) : priority.length;
+    const bi = priority.includes(b) ? priority.indexOf(b) : priority.length;
+    return ai - bi;
+  });
+}
+
+function startStructureWarmup(runId, cx, cz, radius) {
+  cancelStructureWarmup();
+  const keys = structureLoadOrder(activeStructureTypes().filter(key => !featureDataLoaded(key)));
+  if (!keys.length) return;
+  structureWarmupTimer = setTimeout(() => warmStructureLayers(runId, keys, cx, cz, radius), 120);
+}
+
+async function warmStructureLayers(runId, keys, cx, cz, radius) {
+  for (const key of keys) {
+    if (runId !== state.runId || !state.loaded) return;
+    if (!state.vis[key] || featureDataLoaded(key)) continue;
+    try {
+      state.structures[key] = await fetchStructureAround(key, cx, cz, radius);
+      if (runId !== state.runId) return;
+      buildSidebar();
+      requestRender();
+      await wait(90);
+    } catch (err) {
+      console.warn(`${key} warmup failed`, err);
+    }
+  }
+}
+
+function wait(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 async function randomSeed() {
@@ -1743,7 +2009,7 @@ function shareUrl() {
   copyText(buildShareUrl(), "Share URL copied");
 }
 
-function scheduleAutoLoad(delay = 650) {
+function scheduleAutoLoad(delay = 900) {
   clearTimeout(autoLoadTimer);
   const seed = els.seedInput.value.trim();
   if (!seed) return;
@@ -1835,6 +2101,7 @@ function handlePointerMove(event) {
     panSample = { x: state.viewX, z: state.viewZ, t: now };
     lastMoveT = now;
     requestRender();
+    return; // While dragging, skip hover detection (nearestMarker + biomeAt + tooltip).
   }
 
   const marker = nearestMarker(sx, sy);
@@ -1867,6 +2134,7 @@ function bindEvents() {
     panVel = { x: 0, z: 0 };
     canvas.setPointerCapture(event.pointerId);
     canvas.classList.add("dragging");
+    els.tooltip.classList.remove("visible");
   });
   canvas.addEventListener("pointerup", event => {
     if (!pointerMoved) selectLocationAt(event);

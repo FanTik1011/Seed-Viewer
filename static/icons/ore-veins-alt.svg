@@ -1,0 +1,59 @@
+<svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g clip-path="url(#clip0_10296_3895)">
+<rect width="28" height="28" rx="6" fill="url(#paint0_linear_10296_3895)"/>
+<g filter="url(#filter0_f_10296_3895)">
+<circle cx="14" cy="14" r="6" fill="#04030D"/>
+</g>
+<rect x="6" y="13" width="16" height="11" fill="#A29482"/>
+<rect x="12" y="19" width="4" height="6" fill="#915E43"/>
+<rect x="6" y="19" width="2" height="5" fill="#867159"/>
+<rect x="20" y="19" width="2" height="5" fill="#867159"/>
+<rect width="2" height="2" transform="matrix(-1 0 0 1 12 19)" fill="#AB9F8D"/>
+<rect width="2" height="2" transform="matrix(-1 0 0 1 12 17)" fill="#747374"/>
+<rect width="2" height="2" transform="matrix(-1 0 0 1 18 17)" fill="#747374"/>
+<rect width="2" height="2" transform="matrix(-1 0 0 1 20 17)" fill="white"/>
+<rect width="2" height="2" transform="matrix(-1 0 0 1 10 17)" fill="white"/>
+<rect width="12" height="2" transform="matrix(-1 0 0 1 20 15)" fill="#22221D"/>
+<rect width="20" height="3" transform="matrix(-1 0 0 1 24 10)" fill="#22221D"/>
+<rect width="12" height="4" transform="matrix(-1 0 0 1 20 6)" fill="#22221D"/>
+<rect width="4" height="2" transform="matrix(-1 0 0 1 16 4)" fill="#22221D"/>
+<rect width="1" height="1" transform="matrix(-1 0 0 1 14 3)" fill="#22221D"/>
+<rect width="1" height="1" transform="matrix(-1 0 0 1 15 3)" fill="#010101"/>
+<rect width="4" height="3" transform="matrix(-1 0 0 1 16 7)" fill="#26521E"/>
+<rect width="2" height="3" transform="matrix(-1 0 0 1 15 7)" fill="#3B6134"/>
+<rect width="2" height="1" transform="matrix(-1 0 0 1 15 8)" fill="#25B435"/>
+<rect width="1" height="1" transform="matrix(-1 0 0 1 13 8)" fill="#049211"/>
+<rect width="1" height="1" transform="matrix(-1 0 0 1 12 8)" fill="#4C504C"/>
+<rect width="1" height="1" transform="matrix(-1 0 0 1 13 10)" fill="#2D2C30"/>
+<rect width="1" height="1" transform="matrix(-1 0 0 1 19 10)" fill="#2D2C30"/>
+<rect width="1" height="1" transform="matrix(-1 0 0 1 11 10)" fill="#2D2C30"/>
+<rect width="1" height="1" transform="matrix(-1 0 0 1 17 10)" fill="#2D2C30"/>
+<rect width="1" height="1" transform="matrix(-1 0 0 1 9 10)" fill="#2D2C30"/>
+<rect width="1" height="1" transform="matrix(-1 0 0 1 15 10)" fill="#2D2C30"/>
+<rect width="1" height="1" transform="matrix(-1 0 0 1 17 8)" fill="#4C504C"/>
+<rect width="3" height="1" transform="matrix(-1 0 0 1 20 8)" fill="#383632"/>
+<rect width="3" height="1" transform="matrix(-1 0 0 1 11 8)" fill="#383632"/>
+<rect width="1" height="1" transform="matrix(-1 0 0 1 16 8)" fill="#049211"/>
+<rect width="1" height="1" transform="matrix(-1 0 0 1 14 6)" fill="#092422"/>
+<rect width="2" height="2" transform="matrix(-1 0 0 1 18 19)" fill="#AB9F8D"/>
+</g>
+<rect x="0.25" y="0.25" width="27.5" height="27.5" rx="5.75" stroke="url(#paint1_linear_10296_3895)" stroke-width="0.5"/>
+<defs>
+<filter id="filter0_f_10296_3895" x="-1.1" y="-1.1" width="30.2" height="30.2" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feBlend mode="normal" in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
+<feGaussianBlur stdDeviation="4.55" result="effect1_foregroundBlur_10296_3895"/>
+</filter>
+<linearGradient id="paint0_linear_10296_3895" x1="14" y1="0" x2="14" y2="28" gradientUnits="userSpaceOnUse">
+<stop stop-color="#282C3E"/>
+<stop offset="1" stop-color="#181822"/>
+</linearGradient>
+<linearGradient id="paint1_linear_10296_3895" x1="14" y1="0" x2="14" y2="30.9167" gradientUnits="userSpaceOnUse">
+<stop stop-color="#3B6134"/>
+<stop offset="1" stop-color="#3B6134" stop-opacity="0"/>
+</linearGradient>
+<clipPath id="clip0_10296_3895">
+<rect width="28" height="28" rx="6" fill="white"/>
+</clipPath>
+</defs>
+</svg>

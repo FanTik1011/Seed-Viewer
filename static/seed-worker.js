@@ -37,7 +37,20 @@ self.onmessage = async event => {
         w: String(payload.w),
         h: String(payload.h)
       });
+      if (payload.types != null) params.set("types", payload.types);
       data = await getJson(`/api/all_structures?${params}`);
+    } else if (type === "structureType") {
+      const params = new URLSearchParams({
+        seed: payload.seed,
+        version: payload.version,
+        dimension: payload.dimension || "overworld",
+        type: payload.structure,
+        x: String(payload.x),
+        z: String(payload.z),
+        w: String(payload.w),
+        h: String(payload.h)
+      });
+      data = await getJson(`/api/structures?${params}`);
     } else if (type === "randomSeed") {
       data = await getJson("/api/random_seed");
     } else if (type === "searchSeeds") {

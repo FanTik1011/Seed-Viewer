@@ -340,7 +340,10 @@ def _biome_grid_cached(seed: int, mc: int, dim_id: int,
         ptr = ctypes_call(lib.get_biome_grid_dim, seed, mc, dim_id, x, z, w, h, scale)
     if not ptr:
         raise RuntimeError("Biome generation failed")
-    grid = tuple(ptr[i] for i in range(w * h))
+    # ptr[:n] copies the whole buffer at C speed — far faster than a per-element
+    # Python loop, which dominated large-tile (up to 256x256) generation time.
+    n = w * h
+    grid = tuple(ptr[:n])
     lib.free_array(ptr)
     return grid
 
@@ -505,6 +508,14 @@ def all_structures():
     mc   = MC_VERSIONS[version]
     seed = seed_to_int(seed_str)
     available = _available_structures(version, dimension)
+    types_arg = request.args.get("types")
+    if types_arg is not None:
+        requested_types = {
+            name.strip()
+            for name in types_arg.split(",")
+            if name.strip()
+        }
+        available = [name for name in available if name in requested_types]
     if dimension == "end" and not HAS_DIM_STRUCTURES:
         available = []
 
@@ -530,7 +541,7 @@ def all_structures():
 
     # Use min(len(tasks), 8) workers — more than 8 won't help for cubiomes
     if tasks:
-        with ThreadPoolExecutor(max_workers=min(len(tasks), 8)) as pool:
+        with ThreadPoolExecutor(max_workers=min(len(tasks), 6)) as pool:
             futures = {pool.submit(t): t.__name__ for t in tasks}
             for future in as_completed(futures):
                 try:

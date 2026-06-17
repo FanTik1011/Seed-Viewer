@@ -1,0 +1,42 @@
+<svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g clip-path="url(#clip0_10296_1794)">
+<rect width="28" height="28" rx="6" fill="url(#paint0_linear_10296_1794)"/>
+<g filter="url(#filter0_f_10296_1794)">
+<circle cx="14" cy="14" r="6" fill="#04030D"/>
+</g>
+<path d="M15 22H14V19H15V22ZM14 13H15V16H14V19H13V6H14V13ZM11 8H9V7H11V8Z" fill="#E1DDCA"/>
+<path d="M12 21H10V20H12V21Z" fill="#CECAAD"/>
+<path d="M19 20H18V21H17V19H19V20Z" fill="#CECAAD"/>
+<path d="M11 18H10V17H11V18Z" fill="#CECAAD"/>
+<path d="M18 17H16V16H18V17Z" fill="#CECAAD"/>
+<path d="M13 15H11V14H13V15Z" fill="#CECAAD"/>
+<path d="M17 15H15V14H16V13H17V15Z" fill="#CECAAD"/>
+<path d="M12 12H10V10H11V11H12V12Z" fill="#CECAAD"/>
+<path d="M19 12H17V11H19V12Z" fill="#CECAAD"/>
+<path d="M15 10H14V6H15V10Z" fill="#CECAAD"/>
+<path d="M11 9H9V8H11V9Z" fill="#CECAAD"/>
+<path d="M13 8H11V7H13V8Z" fill="#CECAAD"/>
+<path d="M17 8H16V7H17V8Z" fill="#CECAAD"/>
+<path d="M13 21H12V20H13V21ZM19 21H18V20H19V21ZM10 20H9V19H10V20ZM17 20H15V19H17V20ZM10 18H9V16H10V18ZM13 18H11V17H13V18ZM16 18H15V16H16V18ZM18 15H17V14H18V15ZM10 14H9V13H10V14ZM13 14H11V13H13V14ZM19 14H18V13H19V14ZM13 12H12V10H13V12ZM17 12H15V11H17V12ZM19 11H17V10H19V11ZM13 9H11V8H13V9ZM17 9H15V8H17V9ZM19 8H17V7H19V8Z" fill="#DCD9C0"/>
+<path d="M14 22H13V20H10V19H14V22ZM10 21H9V20H10V21ZM17 21H15V20H17V21ZM15 19H14V16H15V19ZM19 18H16V17H18V16H19V18ZM13 17H10V16H13V17ZM11 15H9V14H10V13H11V15ZM19 15H18V14H19V15ZM16 14H15V13H16V14ZM18 14H17V13H18V14ZM15 13H14V10H17V11H15V13ZM10 12H9V10H10V12ZM12 11H11V10H12V11ZM19 9H17V8H19V9ZM16 8H15V7H16V8Z" fill="#E1DDCA"/>
+</g>
+<rect x="0.25" y="0.25" width="27.5" height="27.5" rx="5.75" stroke="url(#paint1_linear_10296_1794)" stroke-width="0.5"/>
+<defs>
+<filter id="filter0_f_10296_1794" x="-1.1" y="-1.1" width="30.2" height="30.2" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feBlend mode="normal" in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
+<feGaussianBlur stdDeviation="4.55" result="effect1_foregroundBlur_10296_1794"/>
+</filter>
+<linearGradient id="paint0_linear_10296_1794" x1="14" y1="0" x2="14" y2="28" gradientUnits="userSpaceOnUse">
+<stop stop-color="#282C3E"/>
+<stop offset="1" stop-color="#181822"/>
+</linearGradient>
+<linearGradient id="paint1_linear_10296_1794" x1="14" y1="0" x2="14" y2="30.9167" gradientUnits="userSpaceOnUse">
+<stop stop-color="#CECAAD"/>
+<stop offset="1" stop-color="#CECAAD" stop-opacity="0"/>
+</linearGradient>
+<clipPath id="clip0_10296_1794">
+<rect width="28" height="28" rx="6" fill="white"/>
+</clipPath>
+</defs>
+</svg>
