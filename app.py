@@ -111,12 +111,15 @@ except AttributeError:
 
 # ─── Constants ─────────────────────────────────────────────────────────────────
 MC_VERSIONS = {
-    "1.16": 17,
-    "1.17": 19,
-    "1.18": 20,
-    "1.19": 21,
-    "1.20": 23,
-    "1.21": 24,
+    # Keep these in sync with cubiomes/biomes.h enum MCVersion.
+    # Wrong values make 1.19 and older use pre-Caves & Cliffs generators,
+    # which is both inaccurate and noticeably slower for map tiles.
+    "1.16": 20,  # MC_1_16
+    "1.17": 21,  # MC_1_17
+    "1.18": 22,  # MC_1_18
+    "1.19": 24,  # MC_1_19
+    "1.20": 25,  # MC_1_20
+    "1.21": 28,  # MC_1_21
 }
 
 STRUCT_TYPES = {
@@ -182,6 +185,7 @@ MAX_STRUCT_W    = 32768
 MAX_STRUCT_H    = 32768
 MAX_STRONGHOLDS = 128
 MAX_STRUCTURES  = 512
+MAX_STRUCTURE_WORKERS = max(2, min(4, (os.cpu_count() or 4) // 2))
 MAX_SEARCH_ATTEMPTS = 250
 MAX_SEARCH_RESULTS  = 24
 MAX_SEARCH_RADIUS   = 6000
@@ -543,7 +547,7 @@ def all_structures():
 
     # Use min(len(tasks), 8) workers — more than 8 won't help for cubiomes
     if tasks:
-        with ThreadPoolExecutor(max_workers=min(len(tasks), 10)) as pool:
+        with ThreadPoolExecutor(max_workers=min(len(tasks), MAX_STRUCTURE_WORKERS)) as pool:
             futures = {pool.submit(t): t.__name__ for t in tasks}
             for future in as_completed(futures):
                 try:

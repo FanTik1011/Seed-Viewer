@@ -59,12 +59,19 @@ const TILE_BUILD_FRAME_BUDGET = 4;
 const TILE_PENDING_VIEW_MARGIN = 2;
 
 
-const LODS = [
+const MODERN_LODS = [
   { blocks: 256,   samples: 32,  scale: 8  },
   { blocks: 1024,  samples: 32,  scale: 32 },
   { blocks: 4096,  samples: 64,  scale: 64 },
   { blocks: 16384, samples: 256, scale: 64 }
 ];
+const LEGACY_LODS = [
+  { blocks: 256,   samples: 16,  scale: 16 },
+  { blocks: 1024,  samples: 64,  scale: 16 },
+  { blocks: 4096,  samples: 64,  scale: 64 },
+  { blocks: 16384, samples: 256, scale: 64 }
+];
+let LODS = MODERN_LODS;
 const MIN_ZOOM = 0.4;
 const MAX_ZOOM = 8;   // was 16: cap how far the map can zoom out (smaller view area → faster location loading)
 const DEFAULT_ZOOM = 2;
@@ -731,6 +738,14 @@ function activeStructureTypes() {
   return Object.keys(STRUCT_META)
     .filter(key => key !== "spawn" && key !== "Stronghold")
     .filter(key => state.vis[key] && isFeatureAvailable(key));
+}
+
+function usesLegacyBiomeLayers(version = state.version) {
+  return ["1.16", "1.17"].includes(version);
+}
+
+function applyVersionLods(version = state.version) {
+  LODS = usesLegacyBiomeLayers(version) ? LEGACY_LODS : MODERN_LODS;
 }
 
 function featureDataLoaded(key) {
@@ -2001,6 +2016,7 @@ async function loadWorld(options = {}) {
   state.seed = seed;
   state.version = version;
   state.dimension = dimension;
+  applyVersionLods(version);
   els.seedInput.value = seed;
   els.version.value = version;
   els.dimension.value = dimension;
