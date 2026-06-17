@@ -16,6 +16,18 @@ const PREFETCH_MARGIN = 1;
 // map is moving) draw cheap dots; above LABEL_LIMIT stop drawing per-marker text.
 const MARKER_LITE_LIMIT = 200;
 const MARKER_LABEL_LIMIT = 50;
+// Zoomed further out than this (blocks/px) structure markers are drawn as
+// clusters (count badges) instead of full markers — still visible, but compact.
+const MARKER_MAX_ZOOM = 5;
+
+// Structure streaming: the world is divided into square regions; as the view
+// moves, regions that scroll into sight are fetched once and their structures
+// merged into the running set, so markers accumulate instead of vanishing.
+const STRUCT_REGION = 3072;            // blocks per structure-fetch region
+const STRUCT_REGION_MARGIN = 1;        // pre-fetch this many regions beyond view
+const MAX_STRUCT_REGION_REQUESTS = 2;  // concurrent region fetches (keep workers free for tiles)
+const MAX_STREAM_MARKERS = 9000;       // soft cap on accumulated structures before pruning
+const STRUCT_KEEP_RADIUS = 5;          // regions around the view kept when pruning
 
 const WORKER_POOL_SIZE = Math.max(3, Math.min(8, navigator.hardwareConcurrency || 4));
 const VISIBLE_TILE_PRIORITY_BOOST = 1_000_000;
@@ -30,10 +42,9 @@ const LODS = [
   { blocks: 4096,  samples: 64,  scale: 64 },
   { blocks: 16384, samples: 256, scale: 64 }
 ];
-const MIN_ZOOM = 0.5;
-
-const MAX_ZOOM = 1.9;
-const DEFAULT_ZOOM = 1.9;
+const MIN_ZOOM = 0.4;
+const MAX_ZOOM = 16;
+const DEFAULT_ZOOM = 2;
 const ZOOM_EASE = 0.25;
 const PAN_FRICTION = 0.9;
 const INITIAL_SCAN_RADIUS = 3072;
@@ -99,21 +110,23 @@ const BIOME_COLORS = {
 };
 
 Object.assign(BIOME_COLORS, {
-  0:"#2d7fd1",1:"#8fbd58",2:"#e8d08a",3:"#7b876d",4:"#3f8d4b",5:"#3f8a73",
-  6:"#4e8064",7:"#2e84cc",8:"#c45a45",9:"#e8e3c8",10:"#88c6dc",11:"#9cd4e0",
-  12:"#d9e8ef",13:"#95a7b0",14:"#d4bba6",15:"#cfae7d",16:"#eadc9d",17:"#d5b45c",
-  18:"#5d8c44",19:"#2f7267",20:"#638d54",21:"#3d9d4d",22:"#2f743e",23:"#45a852",
-  24:"#1e619d",25:"#8b8f8b",26:"#9dc7bf",27:"#6aa84e",28:"#4faf48",29:"#2e6541",
-  30:"#376b69",31:"#2d5958",32:"#5d8f52",33:"#477a45",34:"#789174",35:"#d2bd59",
-  36:"#c4ae4b",37:"#c2744b",38:"#b7663d",39:"#a64f31",44:"#42b6c8",45:"#3f98bd",
-  46:"#307fb0",47:"#2e719f",48:"#275d8e",49:"#214b78",50:"#1d3d67",127:"#17171b",
-  129:"#8fbd58",130:"#d5b55d",131:"#7a866e",132:"#4fa54f",133:"#3f7f69",134:"#5c816a",
-  140:"#a7b6c6",149:"#50a64b",151:"#5aa653",155:"#57bd58",156:"#4fba50",157:"#3f7441",
-  158:"#345f5c",160:"#60895b",161:"#5a8655",162:"#6f8a68",163:"#cbbb52",164:"#b8ae4a",
-  165:"#bd6f43",166:"#ad6239",167:"#98482f",168:"#56b95a",169:"#4b9b4e",170:"#755237",
-  171:"#b53a42",172:"#317f78",173:"#555969",174:"#66875b",175:"#48a877",177:"#8dbb61",
-  178:"#7fa873",179:"#e3edf1",180:"#cfdae2",181:"#c0ccd6",182:"#9a9a84",183:"#24283d",
-  184:"#448a67",185:"#f1a8bd",186:"#dfe5df"
+  0:"#000070",1:"#8DB360",2:"#FA9418",3:"#606060",4:"#056621",5:"#0B6659",
+  6:"#07F9B2",7:"#0000FF",8:"#BF3B3B",9:"#8080FF",10:"#7070D6",11:"#A0A0FF",
+  12:"#FFFFFF",13:"#A0A0A0",14:"#FF00FF",15:"#A000FF",16:"#FADE55",17:"#D25F12",
+  18:"#22551C",19:"#163933",20:"#72789A",21:"#537B09",22:"#2C4205",23:"#628B17",
+  24:"#000030",25:"#A2A284",26:"#FAF0C0",27:"#307444",28:"#1F5F32",29:"#40511A",
+  30:"#31554A",31:"#243F36",32:"#596651",33:"#454F3E",34:"#507050",35:"#BDB25F",
+  36:"#A79D64",37:"#D94515",38:"#B09765",39:"#CA8C65",40:"#8080FF",41:"#8080FF",
+  42:"#8080FF",43:"#8080FF",44:"#0000AC",45:"#000090",46:"#202070",47:"#000050",
+  48:"#000040",49:"#202038",50:"#404090",127:"#000000",129:"#B5DB88",130:"#FFBC40",
+  131:"#888888",132:"#2D8E49",133:"#338E81",134:"#2FFFDA",140:"#B4DCDC",
+  149:"#7BA331",151:"#8AB33F",155:"#589C6C",156:"#47875A",157:"#687942",
+  158:"#597D72",160:"#818E79",161:"#6D7766",162:"#789878",163:"#E5DA87",
+  164:"#CFC58C",165:"#FF6D3D",166:"#D8BF8D",167:"#F2B48D",168:"#768E14",
+  169:"#3B470A",170:"#5E3830",171:"#DD0808",172:"#49907B",173:"#403636",
+  174:"#507050",175:"#59C93C",177:"#60A445",178:"#47783E",179:"#FFFFFF",
+  180:"#B0B0B0",181:"#D8D8D8",182:"#A2A284",183:"#303050",184:"#2F6F50",
+  185:"#F7B2C4",186:"#C9D6C9"
 });
 const BIOME_RGB = new Map(Object.entries(BIOME_COLORS).map(([id, hex]) => [Number(id), hexToRgb(hex)]));
 
@@ -368,7 +381,7 @@ const OVERWORLD_FEATURES = new Set(["spawn","Stronghold","Village","Monument","M
 const NETHER_FEATURES = new Set(["Fortress","Bastion","Ruined_Portal_Nether"]);
 const END_FEATURES = new Set(["End_City","End_Gateway","End_Island"]);
 const OVERWORLD_BASE_FEATURES = new Set(["spawn","Stronghold","Village","Monument","Mansion","Outpost","Desert_Temple","Jungle_Temple","Witch_Hut","Igloo","Ocean_Ruins","Shipwreck","Treasure","Mineshaft","Desert_Well"]);
-const DEFAULT_DISABLED_FEATURES = new Set(["Ocean_Ruins", "Trial_Chambers", "Mineshaft"]);
+const DEFAULT_DISABLED_FEATURES = new Set(["Ocean_Ruins", "Trial_Chambers", "Geode"]);
 
 const canvas = document.getElementById("map-canvas");
 const ctx = canvas.getContext("2d", { alpha: false });
@@ -433,6 +446,8 @@ const state = {
   tileQueue: new Map(),
   pendingTiles: new Set(),
   structures: {},
+  structFetched: new Set(),
+  structSeen: {},
   showBiomes: true,
   showGrid: true,
   showAxes: false,
@@ -462,11 +477,15 @@ let tileBuildPending = false;
 let tilePumpPending = false;
 const tileBuildQueue = [];
 const markerImageCache = new Map();
+const labelWidthCache = new Map();
 let markerCache = null;
 let hudCache = "";
 let selectedPanelCache = "";
 let chunkPillCache = "";
 let structureWarmupTimer = 0;
+let structRegionQueue = [];
+let structRegionInFlight = 0;
+let sidebarRefreshTimer = 0;
 
 
 function initWorker() {
@@ -581,7 +600,6 @@ function bootIcons() {
   document.getElementById("brand-icon").innerHTML = iconMarkup("map", iconAsset("spawn"));
   document.getElementById("empty-icon").innerHTML = iconMarkup("map", iconAsset("spawn"));
   setIcon("random-btn", "shuffle", "Random");
-  setIcon("scan-btn", "refresh", "Scan area");
   setIcon("copy-seed-btn", "copy", "Copy seed");
   setIcon("copy-active-seed", "copy");
   setIcon("copy-cursor", "copy");
@@ -592,7 +610,6 @@ function bootIcons() {
   setIcon("copy-popover-coords", "copy", "Copy");
   setIcon("copy-popover-tp", "target", "/tp");
   setIcon("reset-view-btn", "target", "Reset view");
-  setIcon("scan-current-btn", "refresh", "Scan area");
   setIcon("go-btn", "target", "Go");
   setIcon("close-popover", "close");
   setIcon("share-url-btn", "link", "Share");
@@ -827,6 +844,7 @@ function render() {
     queueCoarseFallbacks(range);
     drawBiomes(range);
     prefetchAround(range);
+    drawMapVignette();
   } else {
     drawDistantMap();
   }
@@ -838,6 +856,7 @@ function render() {
   if (!mapIsMoving()) updateSelectedPanel();
   updateChunkPill();
   pumpTiles();
+  streamStructures();
 }
 
 function prefetchAround(range) {
@@ -856,7 +875,7 @@ function prefetchAround(range) {
 }
 
 function queueCoarseFallbacks(range) {
-  if (!state.showBiomes || !dimensionCaps().biomes || range.lod >= LODS.length - 1 || mapIsMoving()) return;
+  if (!state.showBiomes || !dimensionCaps().biomes || range.lod >= LODS.length - 1) return;
   const startX = range.txMin * range.blocks;
   const endX = (range.txMax + 1) * range.blocks - 1;
   const startZ = range.tzMin * range.blocks;
@@ -876,7 +895,10 @@ function queueCoarseFallbacks(range) {
 }
 
 function mapIsMoving() {
-  return !!(dragStart || momentumRaf || zoomRaf);
+  // A press that hasn't moved yet (a click/tap) is not motion — only an actual
+  // drag, momentum glide, or zoom counts, so clicking never flips markers to the
+  // cheap dot style.
+  return !!((dragStart && pointerMoved) || momentumRaf || zoomRaf);
 }
 
 
@@ -1066,29 +1088,31 @@ function drawSelection() {
 
 function drawStructures() {
   const all = visibleMarkers();
-  if (state.zoom >= 18) {
-    drawMarkerClusters(all);
+  const moving = mapIsMoving();
+  // Single pass: collect just the markers actually on screen.
+  const onScreenMarkers = [];
+  for (const m of all) {
+    const sx = state.width / 2 + (m.x - state.viewX) / state.zoom;
+    const sy = state.height / 2 + (m.z - state.viewZ) / state.zoom;
+    if (sx < -70 || sy < -70 || sx > state.width + 70 || sy > state.height + 70) continue;
+    onScreenMarkers.push(m);
+  }
+  // Zoomed out: show clusters (count badges) so locations stay visible without
+  // clutter or lag. Zoomed in: full markers, labelled for every visible spot
+  // (dots only when moving or extremely dense).
+  if (state.zoom > MARKER_MAX_ZOOM) {
+    drawMarkerClusters(onScreenMarkers, moving);
     return;
   }
-  // Count on-screen markers so we can switch to cheap rendering when the view
-  // is dense or moving. Full markers (shadow + 3 rounded rects + glyph + label)
-  // are fine for a handful but murder framerate by the hundreds during a pan.
-  let onScreen = 0;
-  for (const m of all) {
-    const p = worldToScreen(m.x, m.z);
-    if (p.x >= -70 && p.y >= -70 && p.x <= state.width + 70 && p.y <= state.height + 70) onScreen++;
-  }
-  const lite = mapIsMoving() || onScreen > MARKER_LITE_LIMIT;
-  const showLabels = !lite && onScreen <= MARKER_LABEL_LIMIT;
-  for (const marker of all) drawMarker(marker, lite, showLabels);
+  const lite = moving || onScreenMarkers.length > MARKER_LITE_LIMIT;
+  for (const marker of onScreenMarkers) drawMarker(marker, lite, !lite);
 }
 
-function drawMarkerClusters(markers) {
+function drawMarkerClusters(markers, lite = false) {
   const cells = new Map();
-  const cellSize = state.zoom >= 44 ? 56 : 44;
+  const cellSize = 46;
   for (const marker of markers) {
     const p = worldToScreen(marker.x, marker.z);
-    if (p.x < -70 || p.y < -70 || p.x > state.width + 70 || p.y > state.height + 70) continue;
     const key = `${Math.floor(p.x / cellSize)},${Math.floor(p.y / cellSize)}`;
     const group = cells.get(key) || { count: 0, x: 0, y: 0, color: marker.color, marker };
     group.count++;
@@ -1104,20 +1128,22 @@ function drawMarkerClusters(markers) {
     group.x /= group.count;
     group.y /= group.count;
     if (group.count === 1) {
-      drawMarker(group.marker);
+      drawMarker(group.marker, lite, false);
     } else {
-      drawClusterBadge(group);
+      drawClusterBadge(group, lite);
     }
   }
 }
 
-function drawClusterBadge(group) {
+function drawClusterBadge(group, lite = false) {
   const r = group.count > 99 ? 16 : 14;
   ctx.save();
   ctx.translate(group.x, group.y);
-  ctx.shadowColor = "rgba(0,0,0,.52)";
-  ctx.shadowBlur = 12;
-  ctx.shadowOffsetY = 4;
+  if (!lite) {
+    ctx.shadowColor = "rgba(0,0,0,.52)";
+    ctx.shadowBlur = 12;
+    ctx.shadowOffsetY = 4;
+  }
   ctx.fillStyle = "#111719";
   ctx.strokeStyle = group.color + "dd";
   ctx.lineWidth = 2;
@@ -1169,7 +1195,7 @@ function drawMarker(marker, lite = false, allowLabel = true) {
   ctx.fillRect(-half + 5, -half + 5, size - 10, 2);
   if (!drawMarkerAsset(marker.asset, size)) drawMarkerGlyph(marker.icon, "#07100d", size);
   ctx.restore();
-  if (selected || marker.type === "spawn" || (allowLabel && state.zoom <= 2.5)) drawMarkerLabel(marker, p, color);
+  if (selected || marker.type === "spawn" || allowLabel) drawMarkerLabel(marker, p, color);
 }
 
 function isSelectedMarker(marker) {
@@ -1179,12 +1205,21 @@ function isSelectedMarker(marker) {
     marker.type === state.selected.type;
 }
 
+function labelWidth(label) {
+  let w = labelWidthCache.get(label);
+  if (w === undefined) {
+    w = ctx.measureText(label).width + 14;
+    labelWidthCache.set(label, w);
+  }
+  return w;
+}
+
 function drawMarkerLabel(marker, p, color) {
   const label = marker.ring ? `${marker.label} ${marker.ring}` : marker.label;
   ctx.save();
   ctx.font = "600 12px Inter, system-ui, sans-serif";
   ctx.textBaseline = "middle";
-  const w = ctx.measureText(label).width + 14;
+  const w = labelWidth(label);
   const x = Math.min(state.width - w - 8, Math.max(8, p.x + 16));
   const y = Math.min(state.height - 18, Math.max(18, p.y - 13));
   ctx.fillStyle = "rgba(9,11,15,.84)";
@@ -1454,15 +1489,14 @@ function createTile(grid, lod, tx, tz) {
 
 function tintBiome(rgb, x, z, biomeId) {
   const n = terrainNoise(x, z);
-  const soft = smoothTerrainNoise(x >> 2, z >> 2);
+  const soft = terrainNoise(x >> 2, z >> 2);
   const water = biomeId === 0 || biomeId === 7 || (biomeId >= 44 && biomeId <= 50);
   const snowy = biomeId === 10 || biomeId === 11 || biomeId === 12 || biomeId === 179 || biomeId === 180 || biomeId === 181;
-  const strength = water ? 15 : snowy ? 8 : 22;
-  const shade = Math.round((n - .5) * strength + (soft - .5) * (strength * .55));
-  const warmth = water ? -3 : snowy ? 5 : Math.round((soft - .5) * 8);
-  const r = clamp(rgb[0] + shade + warmth, 0, 255);
-  const g = clamp(rgb[1] + shade + (water ? 1 : 0), 0, 255);
-  const b = clamp(rgb[2] + shade - warmth, 0, 255);
+  const strength = water ? 8 : snowy ? 4 : 10;
+  const shade = Math.round((n - .5) * strength + (soft - .5) * (strength * .35));
+  const r = clamp(rgb[0] + shade, 0, 255);
+  const g = clamp(rgb[1] + shade, 0, 255);
+  const b = clamp(rgb[2] + shade, 0, 255);
   return (r << 16) | (g << 8) | b;
 }
 
@@ -1508,7 +1542,13 @@ function villageLabelAt(x, z) {
 function markerMetaFor(key, point) {
   const meta = STRUCT_META[key];
   if (key !== "Village") return meta;
-  return { ...meta, label: villageLabelAt(point.x, point.z) };
+  // Resolve the village's biome-specific name once (biomes may not be loaded at
+  // first), then cache it on the point so rebuilding the marker list doesn't
+  // re-run a biome lookup per village every time.
+  if (!point._label || point._label === STRUCT_META.Village.label) {
+    point._label = villageLabelAt(point.x, point.z);
+  }
+  return { ...meta, label: point._label };
 }
 
 function buildMarkers() {
@@ -1712,21 +1752,12 @@ async function toggleFeature(key, meta, available) {
   state.vis[key] = next;
   buildSidebar();
   requestRender();
-  if (!next || !state.loaded || featureDataLoaded(key) || key === "spawn" || key === "Stronghold") return;
-
-  showLoader("Loading layer", `Finding ${meta.label} near current area...`);
-  try {
-    state.structures[key] = await fetchStructureAround(key);
-    buildSidebar();
-    requestRender();
-  } catch (err) {
-    console.error(err);
-    state.vis[key] = false;
-    buildSidebar();
-    showToast(`${meta.label} load failed`);
-  } finally {
-    hideLoader();
-  }
+  if (!next || !state.loaded || key === "spawn" || key === "Stronghold") return;
+  // Enabling a structure type: the already-visited regions were fetched without
+  // it, so clear the fetched set and let streaming re-pull them (dedup keeps the
+  // structures we already have, and adds the newly enabled type).
+  state.structFetched = new Set();
+  streamStructures();
 }
 
 function setAllFeatures(active) {
@@ -1735,24 +1766,9 @@ function setAllFeatures(active) {
   }
   buildSidebar();
   requestRender();
-  if (active && state.loaded) loadMissingVisibleFeatures();
-}
-
-async function loadMissingVisibleFeatures() {
-  const missing = activeStructureTypes().filter(key => !featureDataLoaded(key));
-  if (!missing.length) return;
-  showLoader("Loading layers", `Finding ${missing.length} structure layers...`);
-  try {
-    for (const key of missing) {
-      state.structures[key] = await fetchStructureAround(key);
-      buildSidebar();
-      requestRender();
-    }
-  } catch (err) {
-    console.error(err);
-    showToast("Some layers failed to load");
-  } finally {
-    hideLoader();
+  if (active && state.loaded) {
+    state.structFetched = new Set();
+    streamStructures();
   }
 }
 
@@ -1803,6 +1819,7 @@ async function loadWorld(options = {}) {
   state.pendingTiles.clear();
   tileBuildQueue.length = 0;
   state.structures = {};
+  resetStructureStream();
   state.selected = null;
   els.empty.classList.add("hidden");
   showLoader("Loading seed", "Preparing fast map preview...");
@@ -1810,6 +1827,7 @@ async function loadWorld(options = {}) {
     const data = await fetchStructuresAround(0, 0, options.radius || INITIAL_SCAN_RADIUS, []);
     if (runId !== state.runId) return;
     state.structures = data;
+    state.structSeen = {};
     state.loaded = true;
     state.viewX = Number.isFinite(options.centerX) ? Math.round(options.centerX) : (data.spawn?.x ?? 0);
     state.viewZ = Number.isFinite(options.centerZ) ? Math.round(options.centerZ) : (data.spawn?.z ?? 0);
@@ -1823,7 +1841,22 @@ async function loadWorld(options = {}) {
     buildSidebar();
     scheduleUrlUpdate();
     requestRender();
-    startStructureWarmup(runId, state.viewX, state.viewZ, options.radius || INITIAL_SCAN_RADIUS);
+    // One fast request fills the spawn area instantly; mark those regions done
+    // so streaming only tops up the ring around the view and new regions as the
+    // map moves.
+    const center = { x: state.viewX, z: state.viewZ };
+    fetchStructuresAround(center.x, center.z, INITIAL_SCAN_RADIUS)
+      .then(initial => {
+        if (runId !== state.runId) return;
+        if (mergeStreamedStructures(initial)) {
+          markRegionsFetched(center.x, center.z, INITIAL_SCAN_RADIUS);
+          invalidateMarkers();
+          buildSidebar();
+          requestRender();
+        }
+      })
+      .catch(err => console.warn("Initial structures failed", err))
+      .finally(() => { if (runId === state.runId) streamStructures(); });
   } catch (err) {
     if (runId !== state.runId) return;
     console.error(err);
@@ -1839,21 +1872,17 @@ async function scanCurrentArea() {
     showToast("Load a seed first");
     return;
   }
-  showLoader("Scanning area", "Refreshing map preview...");
-  try {
-    const runId = state.runId;
-    const data = await fetchStructuresAround(state.viewX, state.viewZ, MANUAL_SCAN_RADIUS, []);
-    state.structures = data;
-    buildSidebar();
-    scheduleUrlUpdate();
-    requestRender();
-    startStructureWarmup(runId, state.viewX, state.viewZ, MANUAL_SCAN_RADIUS);
-  } catch (err) {
-    console.error(err);
-    showToast("Area scan failed");
-  } finally {
-    hideLoader();
+  // Re-fetch the regions in view (existing markers are kept; dedup avoids
+  // duplicates). Mostly redundant now that structures stream automatically.
+  const r = structRegionRange();
+  for (let rz = r.rzMin; rz <= r.rzMax; rz++) {
+    for (let rx = r.rxMin; rx <= r.rxMax; rx++) {
+      state.structFetched.delete(`${rx},${rz}`);
+    }
   }
+  scheduleUrlUpdate();
+  streamStructures();
+  showToast("Refreshing this area");
 }
 
 async function fetchStructuresAround(cx, cz, radius, types = activeStructureTypes()) {
@@ -1870,6 +1899,202 @@ async function fetchStructuresAround(cx, cz, radius, types = activeStructureType
     h: size,
     types: types.join(",")
   });
+}
+
+// ─── Structure streaming ──────────────────────────────────────────────────────
+// Reset the streamed-region bookkeeping for a fresh world/layer set.
+function resetStructureStream() {
+  state.structFetched = new Set();
+  state.structSeen = {};
+  structRegionQueue = [];
+}
+
+// Mark every region overlapping a square (centre cx,cz; half-size radius) as
+// already fetched, so a one-shot bulk load isn't re-requested region by region.
+function markRegionsFetched(cx, cz, radius) {
+  const rxMin = Math.floor((cx - radius) / STRUCT_REGION);
+  const rxMax = Math.floor((cx + radius) / STRUCT_REGION);
+  const rzMin = Math.floor((cz - radius) / STRUCT_REGION);
+  const rzMax = Math.floor((cz + radius) / STRUCT_REGION);
+  for (let rz = rzMin; rz <= rzMax; rz++) {
+    for (let rx = rxMin; rx <= rxMax; rx++) state.structFetched.add(`${rx},${rz}`);
+  }
+}
+
+// Merge a fetched region's structures into the running set, de-duplicating so
+// the same point fetched from overlapping requests is never added twice.
+function mergeStreamedStructures(data) {
+  let added = 0;
+  if (data.spawn && !state.structures.spawn) state.structures.spawn = data.spawn;
+  if (Array.isArray(data.strongholds) && !Array.isArray(state.structures.strongholds)) {
+    state.structures.strongholds = data.strongholds;
+  }
+  for (const [key, value] of Object.entries(data)) {
+    if (key === "spawn" || key === "strongholds" || !Array.isArray(value)) continue;
+    let arr = state.structures[key];
+    if (!arr) arr = state.structures[key] = [];
+    let seen = state.structSeen[key];
+    if (!seen) {
+      seen = state.structSeen[key] = new Set(arr.map(p => `${p.x},${p.z}`));
+    }
+    for (const p of value) {
+      const k = `${p.x},${p.z}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      arr.push({ x: p.x, z: p.z });
+      added++;
+    }
+  }
+  return added;
+}
+
+function structRegionRange() {
+  const tl = screenToWorld(0, 0);
+  const br = screenToWorld(state.width, state.height);
+  return {
+    rxMin: Math.floor(tl.x / STRUCT_REGION) - STRUCT_REGION_MARGIN,
+    rxMax: Math.floor(br.x / STRUCT_REGION) + STRUCT_REGION_MARGIN,
+    rzMin: Math.floor(tl.z / STRUCT_REGION) - STRUCT_REGION_MARGIN,
+    rzMax: Math.floor(br.z / STRUCT_REGION) + STRUCT_REGION_MARGIN
+  };
+}
+
+// Cheap: called every frame. Enqueues only regions never fetched, so once an
+// area is loaded panning back over it costs nothing.
+function streamStructures() {
+  if (!state.loaded || !dimensionCaps().structures) return;
+  if (!activeStructureTypes().length) return;
+  const view = structRegionRange();
+  // Bound the streamed area to the radius we keep in memory, so a very wide
+  // zoom can't try to fetch the whole world at once. Locations still appear
+  // (as clusters) for this central band, then more load as you pan.
+  const ccx = Math.round((view.rxMin + view.rxMax) / 2);
+  const ccz = Math.round((view.rzMin + view.rzMax) / 2);
+  const r = {
+    rxMin: Math.max(view.rxMin, ccx - STRUCT_KEEP_RADIUS),
+    rxMax: Math.min(view.rxMax, ccx + STRUCT_KEEP_RADIUS),
+    rzMin: Math.max(view.rzMin, ccz - STRUCT_KEEP_RADIUS),
+    rzMax: Math.min(view.rzMax, ccz + STRUCT_KEEP_RADIUS)
+  };
+
+  // Drop queued regions that scrolled far out of view (and let them be
+  // re-fetched later) so a fast pan doesn't chase stale regions.
+  if (structRegionQueue.length) {
+    structRegionQueue = structRegionQueue.filter(job => {
+      const keep = job.rx >= r.rxMin - 1 && job.rx <= r.rxMax + 1 &&
+                   job.rz >= r.rzMin - 1 && job.rz <= r.rzMax + 1;
+      if (!keep) state.structFetched.delete(job.key);
+      return keep;
+    });
+  }
+
+  for (let rz = r.rzMin; rz <= r.rzMax; rz++) {
+    for (let rx = r.rxMin; rx <= r.rxMax; rx++) {
+      const key = `${rx},${rz}`;
+      if (state.structFetched.has(key)) continue;
+      state.structFetched.add(key); // optimistic — removed again if the fetch fails
+      structRegionQueue.push({ rx, rz, key });
+    }
+  }
+  drainStructureRegions();
+}
+
+function drainStructureRegions() {
+  if (structRegionInFlight >= MAX_STRUCT_REGION_REQUESTS || !structRegionQueue.length) return;
+  // Nearest region to the view centre first.
+  const cx = state.viewX, cz = state.viewZ;
+  structRegionQueue.sort((a, b) => {
+    const da = Math.hypot((a.rx + .5) * STRUCT_REGION - cx, (a.rz + .5) * STRUCT_REGION - cz);
+    const db = Math.hypot((b.rx + .5) * STRUCT_REGION - cx, (b.rz + .5) * STRUCT_REGION - cz);
+    return da - db;
+  });
+  while (structRegionInFlight < MAX_STRUCT_REGION_REQUESTS && structRegionQueue.length) {
+    const job = structRegionQueue.shift();
+    const runId = state.runId;
+    structRegionInFlight++;
+    fetchStructureRegion(job.rx, job.rz, runId)
+      .catch(err => {
+        state.structFetched.delete(job.key); // allow a later retry
+        console.warn("Structure region failed", err);
+      })
+      .finally(() => {
+        structRegionInFlight--;
+        drainStructureRegions();
+      });
+  }
+}
+
+// Keep accumulated structures from growing without bound over a long session.
+// When over the cap, drop points in regions far from the current view (and
+// un-mark those regions so they re-stream if revisited). Nearby markers stay,
+// so this never disturbs normal movement.
+function pruneFarStructures() {
+  let total = 0;
+  for (const key of Object.keys(state.structures)) {
+    if (key === "spawn") continue;
+    const v = state.structures[key];
+    if (Array.isArray(v)) total += v.length;
+  }
+  if (total <= MAX_STREAM_MARKERS) return;
+
+  const r = structRegionRange();
+  const cx = (r.rxMin + r.rxMax) / 2;
+  const cz = (r.rzMin + r.rzMax) / 2;
+  const near = (x, z) =>
+    Math.abs(Math.floor(x / STRUCT_REGION) - cx) <= STRUCT_KEEP_RADIUS &&
+    Math.abs(Math.floor(z / STRUCT_REGION) - cz) <= STRUCT_KEEP_RADIUS;
+
+  for (const key of Object.keys(state.structures)) {
+    if (key === "spawn" || key === "strongholds") continue;
+    const arr = state.structures[key];
+    if (!Array.isArray(arr)) continue;
+    const seen = state.structSeen[key];
+    const kept = [];
+    for (const p of arr) {
+      if (near(p.x, p.z)) kept.push(p);
+      else if (seen) seen.delete(`${p.x},${p.z}`);
+    }
+    state.structures[key] = kept;
+  }
+  for (const rkey of [...state.structFetched]) {
+    const [rx, rz] = rkey.split(",").map(Number);
+    if (Math.abs(rx - cx) > STRUCT_KEEP_RADIUS || Math.abs(rz - cz) > STRUCT_KEEP_RADIUS) {
+      state.structFetched.delete(rkey);
+    }
+  }
+  invalidateMarkers();
+}
+
+async function fetchStructureRegion(rx, rz, runId) {
+  const types = activeStructureTypes();
+  if (!types.length) return;
+  const data = await workerRequest("structures", {
+    seed: state.seed,
+    version: state.version,
+    dimension: state.dimension,
+    x: rx * STRUCT_REGION,
+    z: rz * STRUCT_REGION,
+    w: STRUCT_REGION,
+    h: STRUCT_REGION,
+    types: types.join(",")
+  });
+  if (runId !== state.runId) return;
+  const added = mergeStreamedStructures(data);
+  if (added) {
+    pruneFarStructures();
+    scheduleSidebarRefresh();
+  }
+  invalidateMarkers();
+  requestRender();
+}
+
+// Sidebar shows live counts; refreshing its DOM on every merge would thrash, so
+// debounce it.
+function scheduleSidebarRefresh() {
+  clearTimeout(sidebarRefreshTimer);
+  sidebarRefreshTimer = setTimeout(() => {
+    if (state.loaded) buildSidebar();
+  }, 220);
 }
 
 async function fetchStructureAround(key, cx = state.viewX, cz = state.viewZ, radius = INITIAL_SCAN_RADIUS) {
@@ -2181,8 +2406,6 @@ function bindEvents() {
     }
   });
   document.getElementById("random-btn").addEventListener("click", randomSeed);
-  document.getElementById("scan-btn").addEventListener("click", scanCurrentArea);
-  document.getElementById("scan-current-btn").addEventListener("click", scanCurrentArea);
   document.getElementById("zoom-in").addEventListener("click", () => startZoomTo((state.zoomTarget || state.zoom) * .6));
   document.getElementById("zoom-out").addEventListener("click", () => startZoomTo((state.zoomTarget || state.zoom) * 1.66));
   document.getElementById("copy-cursor").addEventListener("click", () => copyCoords(state.cursor));
