@@ -5,31 +5,43 @@ const SAMPLE_SCALE = 8;
 const TILE_SAMPLES = TILE_BLOCKS / SAMPLE_SCALE;
 const MAX_TILE_CACHE = 650;
 const MAX_TILE_QUEUE = 360;
-const MAX_TILE_REQUESTS = Math.max(6, Math.min(14, (navigator.hardwareConcurrency || 4) * 2));
+const MAX_TILE_REQUESTS = Math.max(4, Math.min(8, navigator.hardwareConcurrency || 4));
 const MAX_DRAW_TILES = 240;
 const TILE_REQUEST_TIMEOUT = 9000;
 const MAX_TILE_ATTEMPTS = 3;
 const TILE_RETRY_PENALTY = 4000;
-const PREFETCH_MARGIN = 1;
+const PREFETCH_MARGIN = 0;
 
 // Marker rendering thresholds. Above LITE_LIMIT on-screen markers (or while the
 // map is moving) draw cheap dots; above LABEL_LIMIT stop drawing per-marker text.
 const MARKER_LITE_LIMIT = 200;
 const MARKER_LABEL_LIMIT = 50;
+const MARKER_CLUSTER_LIMIT = 120;
 // Zoomed further out than this (blocks/px) structure markers are drawn as
 // clusters (count badges) instead of full markers — still visible, but compact.
 const MARKER_MAX_ZOOM = 5;
+const DENSE_MARKER_MAX_ZOOM = 2.2;
+const DENSE_MARKER_TYPES = new Set([
+  "Mineshaft", "Ruined_Portal", "Treasure", "Shipwreck", "Trail_Ruins",
+  "Dungeon", "Cave", "Ravine", "Lava_Pool", "Apple", "Desert_Well"
+]);
 
 // Structure streaming: the world is divided into square regions; as the view
 // moves, regions that scroll into sight are fetched once and their structures
 // merged into the running set, so markers accumulate instead of vanishing.
 const STRUCT_REGION = 3072;            // blocks per structure-fetch region
-const STRUCT_REGION_MARGIN = 1;        // pre-fetch this many regions beyond view
-const MAX_STRUCT_REGION_REQUESTS = 3;  // concurrent region fetches (keeps workers free for tiles)
-const STRUCT_BULK_RADIUS = 4096;       // fast first pass around the current view
-const STRUCT_BULK_MAX_RADIUS = 8192;   // cap bulk scans so far-zoom views stay responsive
-const MAX_STREAM_MARKERS = 16000;      // soft cap on accumulated structures before pruning
-const STRUCT_KEEP_RADIUS = 8;          // regions around the view kept when pruning
+const STRUCT_REGION_MARGIN = 0;        // load the viewport first; nearby areas stream after movement
+const MAX_STRUCT_REGION_REQUESTS = 2;  // concurrent region fetches (keeps workers free for tiles)
+const STRUCT_BULK_RADIUS = 2048;       // compact first pass around the current view
+const STRUCT_BULK_MAX_RADIUS = 3072;   // cap bulk scans so far-zoom views stay responsive
+const STRUCT_VIEW_BUFFER = 768;        // small edge buffer; keeps first result quick
+const MAX_STREAM_MARKERS = 3500;       // soft cap on accumulated structures before pruning
+const STRUCT_KEEP_RADIUS = 2;          // regions around the view kept when pruning
+const STRUCT_DEFER_DELAY = 140;        // lower-priority locations load just after the first paint
+const STRUCT_FAST_TYPES = [
+  "Village", "Ancient_City", "Mansion", "Monument", "Outpost",
+  "Desert_Temple", "Jungle_Temple", "Witch_Hut", "Igloo"
+];
 
 const WORKER_POOL_SIZE = Math.max(2, Math.min(5, Math.ceil((navigator.hardwareConcurrency || 4) / 2)));
 const VISIBLE_TILE_PRIORITY_BOOST = 1_000_000;
@@ -49,10 +61,10 @@ const MAX_ZOOM = 16;
 const DEFAULT_ZOOM = 2;
 const ZOOM_EASE = 0.25;
 const PAN_FRICTION = 0.9;
-const INITIAL_SCAN_RADIUS = 3072;
-const MANUAL_SCAN_RADIUS = 4096;
-const MAP_BG = "#07110f";
-const EMPTY_TILE_COLORS = ["#0c1915", "#101e19"];
+const INITIAL_SCAN_RADIUS = 2048;
+const MANUAL_SCAN_RADIUS = 3072;
+const MAP_BG = "#17158b";
+const EMPTY_TILE_COLORS = ["#17158b", "#17158b"];
 const UNKNOWN_BIOME_RGB = [38, 45, 41];
 
 const ICONS = {
@@ -383,7 +395,11 @@ const OVERWORLD_FEATURES = new Set(["spawn","Stronghold","Village","Monument","M
 const NETHER_FEATURES = new Set(["Fortress","Bastion","Ruined_Portal_Nether"]);
 const END_FEATURES = new Set(["End_City","End_Gateway","End_Island"]);
 const OVERWORLD_BASE_FEATURES = new Set(["spawn","Stronghold","Village","Monument","Mansion","Outpost","Desert_Temple","Jungle_Temple","Witch_Hut","Igloo","Ocean_Ruins","Shipwreck","Treasure","Mineshaft","Desert_Well"]);
-const DEFAULT_DISABLED_FEATURES = new Set(["Ocean_Ruins", "Trial_Chambers", "Geode"]);
+const DEFAULT_DISABLED_FEATURES = new Set([
+  "Ocean_Ruins", "Trial_Chambers", "Geode",
+  "Mineshaft", "Ruined_Portal", "Treasure", "Shipwreck", "Trail_Ruins",
+  "Dungeon", "Cave", "Ravine", "Lava_Pool", "Apple", "Desert_Well"
+]);
 
 const canvas = document.getElementById("map-canvas");
 const ctx = canvas.getContext("2d", { alpha: false });
@@ -557,6 +573,7 @@ async function directRequest(type, payload = {}) {
       h: String(payload.h)
     });
     if (payload.types != null) params.set("types", payload.types);
+    if (payload.core != null) params.set("core", payload.core ? "1" : "0");
     url = `${API}/api/all_structures?${params}`;
   } else if (type === "structureType") {
     const params = new URLSearchParams({
@@ -607,7 +624,7 @@ function bootIcons() {
   setIcon("random-btn", "shuffle", "Random");
   setIcon("copy-seed-btn", "copy", "Copy seed");
   setIcon("copy-active-seed", "copy");
-  setIcon("copy-cursor", "copy");
+  if (document.getElementById("copy-cursor")) setIcon("copy-cursor", "copy");
   setIcon("zoom-in", "plus");
   setIcon("zoom-out", "minus");
   setIcon("copy-selected-coords", "copy", "Copy");
@@ -615,7 +632,7 @@ function bootIcons() {
   setIcon("copy-popover-coords", "copy", "Copy");
   setIcon("copy-popover-tp", "target", "/tp");
   setIcon("reset-view-btn", "target", "Reset view");
-  setIcon("go-btn", "target", "Go");
+  setIcon("go-btn", "play", "Go to location");
   setIcon("close-popover", "close");
   setIcon("share-url-btn", "link", "Share");
 }
@@ -892,12 +909,11 @@ function render() {
     : "Biome streaming for this dimension needs a rebuilt native library";
   trimTileQueueToView(range);
   if (detailedBiomes) {
-    queueCoarseFallbacks(range);
     drawBiomes(range);
     prefetchAround(range);
     drawMapVignette();
   } else {
-    drawDistantMap();
+    drawSeedmapLoadingMap(range);
   }
   if (state.showGrid && gridRange.tilePx >= 12) drawGrid(gridRange);
   if (state.showAxes) drawAxes();
@@ -976,8 +992,9 @@ function drawFallbackTile(fineLod, tx, tz, pos, tilePx) {
 function drawBiomes(range) {
   const cfg = LODS[range.lod];
   const tilePx = cfg.blocks / state.zoom;
-  for (let tz = range.tzMin; tz <= range.tzMax; tz++) {
-    for (let tx = range.txMin; tx <= range.txMax; tx++) {
+  const tiles = orderedTiles(range);
+  for (const item of tiles) {
+      const { tx, tz } = item;
       const key = tileKey(range.lod, tx, tz);
       const pos = worldToScreen(tx * cfg.blocks, tz * cfg.blocks);
       const tile = state.tiles.get(key);
@@ -987,67 +1004,59 @@ function drawBiomes(range) {
       } else if (state.showBiomes && drawFallbackTile(range.lod, tx, tz, pos, tilePx)) {
       
       } else {
-        ctx.fillStyle = EMPTY_TILE_COLORS[(tx + tz) & 1];
-        ctx.fillRect(pos.x, pos.y, tilePx + 1, tilePx + 1);
+        drawPendingTile(pos, tilePx, item.dist);
       }
       if (state.showBiomes && !tile) queueTile(range.lod, tx, tz, true);
-    }
   }
 }
 
-function drawDistantMap() {
+function drawSeedmapLoadingMap(range) {
   ctx.save();
-  const step = Math.max(28, Math.min(88, 520 / state.zoom));
-  ctx.fillStyle = state.dimension === "nether" ? "#1a0c0b" : state.dimension === "end" ? "#100e18" : MAP_BG;
-  ctx.fillRect(0, 0, state.width, state.height);
-  for (let y = -step; y < state.height + step; y += step) {
-    for (let x = -step; x < state.width + step; x += step) {
-      const world = screenToWorld(x, y);
-      const n = smoothTerrainNoise(Math.floor(world.x / 96), Math.floor(world.z / 96));
-      const water = n < .28;
-      const ridge = n > .78;
-      if (state.dimension === "nether") {
-        ctx.fillStyle = n < .25 ? "rgba(128,40,32,.36)" : ridge ? "rgba(226,94,54,.28)" : "rgba(96,30,28,.24)";
-      } else if (state.dimension === "end") {
-        ctx.fillStyle = n < .2 ? "rgba(59,49,89,.24)" : ridge ? "rgba(231,220,170,.22)" : "rgba(132,119,167,.18)";
-      } else {
-        ctx.fillStyle = water ? "rgba(49,137,168,.28)" : ridge ? "rgba(203,171,104,.22)" : "rgba(87,151,86,.19)";
-      }
-      ctx.fillRect(x, y, step + 1, step + 1);
+  drawBiomes(range);
+  ctx.strokeStyle = "rgba(255,255,255,.18)";
+  ctx.lineWidth = 1;
+  drawLoadedTileOutline(range);
+  ctx.restore();
+}
+
+function orderedTiles(range) {
+  const cx = state.viewX / range.blocks;
+  const cz = state.viewZ / range.blocks;
+  const tiles = [];
+  for (let tz = range.tzMin; tz <= range.tzMax; tz++) {
+    for (let tx = range.txMin; tx <= range.txMax; tx++) {
+      tiles.push({ tx, tz, dist: Math.hypot(tx + .5 - cx, tz + .5 - cz) });
     }
   }
-  drawMapVignette();
-  ctx.strokeStyle = "rgba(245,250,245,.035)";
+  return tiles.sort((a, b) => a.dist - b.dist);
+}
+
+function drawPendingTile(pos, tilePx, dist) {
+  if (tilePx < 18) return;
+  const alpha = clamp(.08 - dist * .006, .018, .055);
+  ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+  ctx.fillRect(pos.x, pos.y, tilePx + 1, tilePx + 1);
+}
+
+function drawLoadedTileOutline(range) {
+  const cfg = LODS[range.lod];
+  const tilePx = cfg.blocks / state.zoom;
+  if (tilePx < 10) return;
+  ctx.save();
+  ctx.strokeStyle = "rgba(255,255,255,.42)";
   ctx.lineWidth = 1;
-  for (let x = 0; x <= state.width; x += step) {
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, state.height);
-    ctx.stroke();
-  }
-  for (let y = 0; y <= state.height; y += step) {
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(state.width, y);
-    ctx.stroke();
+  for (let tz = range.tzMin; tz <= range.tzMax; tz++) {
+    for (let tx = range.txMin; tx <= range.txMax; tx++) {
+      if (!state.tiles.has(tileKey(range.lod, tx, tz))) continue;
+      const pos = worldToScreen(tx * cfg.blocks, tz * cfg.blocks);
+      ctx.strokeRect(Math.round(pos.x) + .5, Math.round(pos.y) + .5, Math.round(tilePx), Math.round(tilePx));
+    }
   }
   ctx.restore();
 }
 
 function drawMapVignette() {
-  const g = ctx.createRadialGradient(
-    state.width * .5,
-    state.height * .45,
-    Math.min(state.width, state.height) * .15,
-    state.width * .5,
-    state.height * .5,
-    Math.max(state.width, state.height) * .72
-  );
-  g.addColorStop(0, "rgba(255,255,255,.035)");
-  g.addColorStop(.62, "rgba(0,0,0,0)");
-  g.addColorStop(1, "rgba(0,0,0,.24)");
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, state.width, state.height);
+  // Disabled: the edge vignette looked like a persistent top header strip.
 }
 
 function drawGrid(range) {
@@ -1081,7 +1090,6 @@ function drawGridLabels(range) {
     const wx = tx * TILE_BLOCKS;
     const x = worldToScreen(wx, 0).x;
     if (x < -30 || x > state.width + 30) continue;
-    drawGridTag(String(wx), x, 18);
     drawGridTag(String(wx), x, state.height - 18);
   }
   ctx.textAlign = "center";
@@ -1089,7 +1097,6 @@ function drawGridLabels(range) {
     const wz = tz * TILE_BLOCKS;
     const y = worldToScreen(0, wz).y;
     if (y < -30 || y > state.height + 30) continue;
-    drawGridTag(String(wz), 30, y);
     drawGridTag(String(wz), state.width - 30, y);
   }
   ctx.restore();
@@ -1143,6 +1150,7 @@ function drawStructures() {
   // Single pass: collect just the markers actually on screen.
   const onScreenMarkers = [];
   for (const m of all) {
+    if (shouldHideDenseMarker(m)) continue;
     const sx = state.width / 2 + (m.x - state.viewX) / state.zoom;
     const sy = state.height / 2 + (m.z - state.viewZ) / state.zoom;
     if (sx < -70 || sy < -70 || sx > state.width + 70 || sy > state.height + 70) continue;
@@ -1151,8 +1159,8 @@ function drawStructures() {
   // Zoomed out: show clusters (count badges) so locations stay visible without
   // clutter or lag. Zoomed in: full markers, labelled for every visible spot
   // (dots only when moving or extremely dense).
-  if (state.zoom > MARKER_MAX_ZOOM) {
-    drawMarkerClusters(onScreenMarkers, moving);
+  if (state.zoom > MARKER_MAX_ZOOM || onScreenMarkers.length > MARKER_CLUSTER_LIMIT || moving && onScreenMarkers.length > MARKER_LABEL_LIMIT) {
+    drawMarkerClusters(onScreenMarkers, true);
     return;
   }
   const lite = onScreenMarkers.length > MARKER_LITE_LIMIT;
@@ -1160,9 +1168,14 @@ function drawStructures() {
   for (const marker of onScreenMarkers) drawMarker(marker, lite, allowLabel);
 }
 
+function shouldHideDenseMarker(marker) {
+  if (marker.type === "spawn" || marker.type === "Stronghold" || marker.type === "Village") return false;
+  return DENSE_MARKER_TYPES.has(marker.type) && state.zoom > DENSE_MARKER_MAX_ZOOM;
+}
+
 function drawMarkerClusters(markers, lite = false) {
   const cells = new Map();
-  const cellSize = 46;
+  const cellSize = markers.length > 450 ? 70 : markers.length > 220 ? 58 : 46;
   for (const marker of markers) {
     const p = worldToScreen(marker.x, marker.z);
     const key = `${Math.floor(p.x / cellSize)},${Math.floor(p.y / cellSize)}`;
@@ -1643,6 +1656,7 @@ function nearestMarker(mx, my) {
   let best = null;
   let bestDist = 18;
   for (const marker of visibleMarkers()) {
+    if (shouldHideDenseMarker(marker)) continue;
     const p = worldToScreen(marker.x, marker.z);
     const dist = Math.hypot(p.x - mx, p.y - my);
     if (dist < bestDist) {
@@ -1658,9 +1672,9 @@ function updateHud() {
   const key = `${state.cursor.x}|${state.cursor.z}|${zoomText}`;
   if (key === hudCache) return;
   hudCache = key;
-  els.coordX.textContent = state.cursor.x;
-  els.coordZ.textContent = state.cursor.z;
-  els.zoomLabel.textContent = zoomText;
+  if (els.coordX) els.coordX.textContent = state.cursor.x;
+  if (els.coordZ) els.coordZ.textContent = state.cursor.z;
+  if (els.zoomLabel) els.zoomLabel.textContent = zoomText;
   if (els.zoomRange && document.activeElement !== els.zoomRange) {
     els.zoomRange.value = String(zoomToSlider(state.zoom));
   }
@@ -1952,7 +1966,8 @@ async function fetchStructuresAround(cx, cz, radius, types = activeStructureType
     z,
     w: size,
     h: size,
-    types: types.join(",")
+    types: types.join(","),
+    core: types.length === 0
   });
 }
 
@@ -2030,28 +2045,43 @@ function structRegionRange() {
 
 function visibleStructureRadius() {
   const halfView = Math.max(state.width * state.zoom, state.height * state.zoom) / 2;
-  return Math.ceil(clamp(Math.max(STRUCT_BULK_RADIUS, halfView + STRUCT_REGION), STRUCT_BULK_RADIUS, STRUCT_BULK_MAX_RADIUS));
+  return Math.ceil(clamp(Math.max(STRUCT_BULK_RADIUS, halfView + STRUCT_VIEW_BUFFER), STRUCT_BULK_RADIUS, STRUCT_BULK_MAX_RADIUS));
 }
 
 function startVisibleStructureBulk(runId, cx, cz, radius) {
   const types = activeStructureTypes();
   if (!types.length || !dimensionCaps().structures) return;
+  const fast = priorityStructureTypes(types);
+  const first = fast.length ? fast : types;
+  const rest = types.filter(type => !first.includes(type));
+
+  fetchStructureBatch(runId, cx, cz, radius, first, true);
+  if (rest.length) {
+    setTimeout(() => fetchStructureBatch(runId, cx, cz, radius, rest, false), STRUCT_DEFER_DELAY);
+  }
+}
+
+function priorityStructureTypes(types) {
+  return STRUCT_FAST_TYPES.filter(type => types.includes(type));
+}
+
+function fetchStructureBatch(runId, cx, cz, radius, types, primary) {
+  if (runId !== state.runId || !state.loaded || !types.length) return;
   fetchStructuresAround(cx, cz, radius, types)
     .then(data => {
       if (runId !== state.runId || !state.loaded) return;
       const added = mergeStreamedStructures(data);
-      if (added) {
-        pruneFarStructures();
-        invalidateMarkers();
-        scheduleSidebarRefresh();
-        requestRender();
-      }
+      if (!added) return;
+      pruneFarStructures();
+      invalidateMarkers();
+      scheduleSidebarRefresh();
+      requestRender();
     })
     .catch(err => {
       if (runId !== state.runId) return;
-      unmarkRegionsFetched(cx, cz, radius);
-      console.warn("Visible structures failed", err);
-      scheduleStructureStream(300, true);
+      if (primary) unmarkRegionsFetched(cx, cz, radius);
+      console.warn(primary ? "Visible structures failed" : "Deferred structures failed", err);
+      scheduleStructureStream(primary ? 260 : 520, true);
     });
 }
 
@@ -2461,7 +2491,7 @@ function bindEvents() {
   document.getElementById("random-btn").addEventListener("click", randomSeed);
   document.getElementById("zoom-in").addEventListener("click", () => startZoomTo((state.zoomTarget || state.zoom) * .6));
   document.getElementById("zoom-out").addEventListener("click", () => startZoomTo((state.zoomTarget || state.zoom) * 1.66));
-  document.getElementById("copy-cursor").addEventListener("click", () => copyCoords(state.cursor));
+  document.getElementById("copy-cursor")?.addEventListener("click", () => copyCoords(state.cursor));
   document.getElementById("copy-selected-coords").addEventListener("click", () => copyCoords(selectedPoint()));
   document.getElementById("copy-selected-tp").addEventListener("click", () => copyTp(selectedPoint()));
   document.getElementById("copy-popover-coords").addEventListener("click", () => copyCoords(selectedPoint()));

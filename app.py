@@ -533,8 +533,10 @@ def all_structures():
     def fetch_struct(sname):
         return sname, _points_for_structure(seed, mc, sname, x, z, w, h, dimension)
 
+    include_core = request.args.get("core", "1") != "0"
+
     tasks = []
-    if dimension == "overworld":
+    if include_core and dimension == "overworld":
         tasks.extend([fetch_spawn, fetch_strongholds])
     for sname in available:
         tasks.append(lambda s=sname: fetch_struct(s))

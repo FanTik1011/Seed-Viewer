@@ -38,6 +38,7 @@ self.onmessage = async event => {
         h: String(payload.h)
       });
       if (payload.types != null) params.set("types", payload.types);
+      if (payload.core != null) params.set("core", payload.core ? "1" : "0");
       data = await getJson(`/api/all_structures?${params}`);
     } else if (type === "structureType") {
       const params = new URLSearchParams({
