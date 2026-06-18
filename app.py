@@ -136,6 +136,9 @@ MC_VERSIONS = {
     "1.19": 24,
     "1.20": 25,
     "1.21": 28,
+    # cubiomes bundled with this app only knows up to MC_1_21_WD.
+    # Keep 26.1 selectable while using the newest available generator.
+    "26.1": 28,
 }
 
 STRUCT_TYPES = {
@@ -184,6 +187,7 @@ _VERSION_EXTRAS = {
     "1.19": {"Ruined_Portal", "Ruined_Portal_Nether", "Geode", "Ancient_City", "Fortress", "Bastion", "End_City", "End_Gateway", "End_Island"},
     "1.20": {"Ruined_Portal", "Ruined_Portal_Nether", "Geode", "Ancient_City", "Trail_Ruins", "Fortress", "Bastion", "End_City", "End_Gateway", "End_Island"},
     "1.21": {"Ruined_Portal", "Ruined_Portal_Nether", "Geode", "Ancient_City", "Trail_Ruins", "Trial_Chambers", "Fortress", "Bastion", "End_City", "End_Gateway", "End_Island"},
+    "26.1": {"Ruined_Portal", "Ruined_Portal_Nether", "Geode", "Ancient_City", "Trail_Ruins", "Trial_Chambers", "Fortress", "Bastion", "End_City", "End_Gateway", "End_Island"},
 }
 
 OVERWORLD_BASE_STRUCTS = [
