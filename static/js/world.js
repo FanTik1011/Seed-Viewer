@@ -21,7 +21,6 @@ async function loadWorld(options = {}) {
   cancelAllTileRequests();
   state.tiles.clear();
   state.tileQueue.clear();
-  tilePreviewCache.clear();
   tileBuildQueue.length = 0;
   state.structures = {};
   resetStructureStream();
