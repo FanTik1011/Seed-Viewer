@@ -95,6 +95,7 @@ let tileBuildPending = false;
 let tilePumpPending = false;
 const tileBuildQueue = [];
 let tileQueueSeq = 0;
+const tilePreviewCache = new Map();
 const markerImageCache = new Map();
 const labelWidthCache = new Map();
 let markerCache = null;

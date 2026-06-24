@@ -74,7 +74,7 @@ function updateHud() {
 
 function updateChunkPill() {
   const n = state.pendingTiles.size + state.tileQueue.size;
-  const visible = state.loaded && n > 0;
+  const visible = false;
   const text = n === 1 ? "Loading 1 chunk" : `Loading ${n} chunks`;
   const key = `${visible}|${text}`;
   if (key === chunkPillCache) return;

@@ -136,7 +136,7 @@ function drawBiomes(range, queueVisible = true) {
       } else if (state.showBiomes && drawFallbackTile(range.lod, tx, tz, pos, tilePx)) {
 
       } else {
-        drawPendingTile(pos, tilePx, item.dist);
+        drawPendingTile(range.lod, tx, tz, pos, tilePx);
       }
       if (queueVisible && state.showBiomes && !tile && queuedThisFrame < queueBudget) {
         if (queueTile(range.lod, tx, tz, true, item.dist < 2.2)) queuedThisFrame++;
@@ -148,9 +148,6 @@ function drawBiomes(range, queueVisible = true) {
 function drawSeedmapLoadingMap(range) {
   ctx.save();
   drawBiomes(range, false);
-  ctx.strokeStyle = "rgba(255,255,255,.18)";
-  ctx.lineWidth = 1;
-  drawLoadedTileOutline(range);
   ctx.restore();
 }
 
@@ -166,11 +163,86 @@ function orderedTiles(range) {
   return tiles.sort((a, b) => a.dist - b.dist);
 }
 
-function drawPendingTile(pos, tilePx, dist) {
-  if (tilePx < 18) return;
-  const alpha = clamp(.08 - dist * .006, .018, .055);
-  ctx.fillStyle = `rgba(255,255,255,${alpha})`;
-  ctx.fillRect(pos.x, pos.y, tilePx + 1, tilePx + 1);
+function drawPendingTile(lod, tx, tz, pos, tilePx) {
+  if (!state.showBiomes) return;
+  const preview = previewTile(lod, tx, tz);
+  ctx.drawImage(preview, pos.x, pos.y, tilePx + 1, tilePx + 1);
+}
+
+function previewTile(lod, tx, tz) {
+  const key = `${state.seed}|${state.version}|${state.dimension}|${lod}:${tx},${tz}`;
+  let tile = tilePreviewCache.get(key);
+  if (tile) return tile;
+  const cfg = LODS[lod];
+  const s = TILE_PREVIEW_SAMPLES;
+  const cnv = document.createElement("canvas");
+  cnv.width = s;
+  cnv.height = s;
+  const c = cnv.getContext("2d", { alpha: false });
+  const img = c.createImageData(s, s);
+  const pixels = img.data;
+  const seedHash = hashString(`${state.seed}|${state.version}|${state.dimension}`);
+  for (let y = 0; y < s; y++) {
+    for (let x = 0; x < s; x++) {
+      const wx = tx * cfg.blocks + Math.floor(x * cfg.blocks / s);
+      const wz = tz * cfg.blocks + Math.floor(y * cfg.blocks / s);
+      const color = previewBiomeColor(seedHash, wx, wz, lod);
+      const i = (y * s + x) * 4;
+      pixels[i] = (color >> 16) & 255;
+      pixels[i + 1] = (color >> 8) & 255;
+      pixels[i + 2] = color & 255;
+      pixels[i + 3] = 255;
+    }
+  }
+  c.putImageData(img, 0, 0);
+  tilePreviewCache.set(key, cnv);
+  prunePreviewCache();
+  return cnv;
+}
+
+function previewBiomeColor(seedHash, wx, wz, lod) {
+  const coarse = previewNoise(seedHash, wx >> (lod + 8), wz >> (lod + 8));
+  const detail = previewNoise(seedHash ^ 0x9e3779b9, wx >> (lod + 6), wz >> (lod + 6));
+  const wet = previewNoise(seedHash ^ 0x85ebca6b, wx >> 10, wz >> 10);
+  const heat = previewNoise(seedHash ^ 0xc2b2ae35, wx >> 11, wz >> 11);
+  let biomeId = 1;
+  if (wet < .18) biomeId = heat > .55 ? 2 : 35;
+  else if (coarse < .22) biomeId = 0;
+  else if (detail < .28) biomeId = heat > .5 ? 4 : 5;
+  else if (detail > .82) biomeId = heat > .62 ? 21 : 18;
+  else if (wet > .78) biomeId = 6;
+  return rgbToInt(BIOME_RGB.get(biomeId) || UNKNOWN_BIOME_RGB);
+}
+
+function previewNoise(seed, x, z) {
+  let v = Math.imul(x ^ seed, 0x27d4eb2d) ^ Math.imul(z ^ (seed >>> 1), 0x165667b1);
+  v ^= v >>> 15;
+  v = Math.imul(v, 0x85ebca6b);
+  v ^= v >>> 13;
+  return (v >>> 0) / 4294967295;
+}
+
+function hashString(text) {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function rgbToInt(rgb) {
+  return (rgb[0] << 16) | (rgb[1] << 8) | rgb[2];
+}
+
+function prunePreviewCache() {
+  if (tilePreviewCache.size <= MAX_TILE_PREVIEW_CACHE) return;
+  const drop = tilePreviewCache.size - MAX_TILE_PREVIEW_CACHE;
+  let i = 0;
+  for (const key of tilePreviewCache.keys()) {
+    tilePreviewCache.delete(key);
+    if (++i >= drop) break;
+  }
 }
 
 function drawLoadedTileOutline(range) {

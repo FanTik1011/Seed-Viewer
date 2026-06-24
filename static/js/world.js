@@ -21,27 +21,37 @@ async function loadWorld(options = {}) {
   cancelAllTileRequests();
   state.tiles.clear();
   state.tileQueue.clear();
+  tilePreviewCache.clear();
   tileBuildQueue.length = 0;
   state.structures = {};
   resetStructureStream();
   state.selected = null;
   els.empty.classList.add("hidden");
-  showLoader("Loading seed", "Preparing fast map preview...");
+  hideLoader();
+  state.loaded = true;
+  state.viewX = Number.isFinite(options.centerX) ? Math.round(options.centerX) : 0;
+  state.viewZ = Number.isFinite(options.centerZ) ? Math.round(options.centerZ) : 0;
+  state.zoom = Number.isFinite(options.zoom) ? clamp(options.zoom, MIN_ZOOM, MAX_ZOOM) : DEFAULT_ZOOM;
+  state.zoomTarget = state.zoom;
+  cancelZoomAnim();
+  cancelMomentum();
+  els.activeSeed.textContent = seed;
+  els.seedCard.classList.add("visible");
+  buildSidebar();
+  scheduleUrlUpdate();
+  primeVisibleBiomeTiles();
+  requestRender();
   try {
-    const data = await fetchStructuresAround(0, 0, options.radius || INITIAL_SCAN_RADIUS, []);
+    const data = await fetchStructuresAround(state.viewX, state.viewZ, options.radius || INITIAL_SCAN_RADIUS, []);
     if (runId !== state.runId) return;
     state.structures = data;
     state.structSeen = {};
-    state.loaded = true;
-    state.viewX = Number.isFinite(options.centerX) ? Math.round(options.centerX) : (data.spawn?.x ?? 0);
-    state.viewZ = Number.isFinite(options.centerZ) ? Math.round(options.centerZ) : (data.spawn?.z ?? 0);
-    state.zoom = Number.isFinite(options.zoom) ? clamp(options.zoom, MIN_ZOOM, MAX_ZOOM) : DEFAULT_ZOOM;
-    state.zoomTarget = state.zoom;
-    cancelZoomAnim();
-    cancelMomentum();
+    if (data.spawn && !Number.isFinite(options.centerX) && !Number.isFinite(options.centerZ)) {
+      state.viewX = data.spawn.x;
+      state.viewZ = data.spawn.z;
+      primeVisibleBiomeTiles();
+    }
     if (data.spawn) selectLocation({ type:"spawn", ...data.spawn, ...STRUCT_META.spawn });
-    els.activeSeed.textContent = seed;
-    els.seedCard.classList.add("visible");
     buildSidebar();
     scheduleUrlUpdate();
     requestRender();
@@ -53,8 +63,7 @@ async function loadWorld(options = {}) {
   } catch (err) {
     if (runId !== state.runId) return;
     console.error(err);
-    els.empty.classList.remove("hidden");
-    showToast("World load failed");
+    showToast("Structures are still unavailable");
   } finally {
     if (runId === state.runId) hideLoader();
   }
