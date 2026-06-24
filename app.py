@@ -6,14 +6,30 @@ import sys
 import random
 import logging
 import math
+from array import array
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
+from threading import BoundedSemaphore
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
 log = logging.getLogger(__name__)
+
+
+def _env_int(name: str, default: int, lo: int, hi: int) -> int:
+    try:
+        value = int(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        value = default
+    return max(lo, min(hi, value))
+
+
+CPU_COUNT = os.cpu_count() or 4
+BIOME_WORKERS = _env_int("BIOME_WORKERS", max(2, min(8, CPU_COUNT - 1)), 1, 32)
+BIOME_SEMAPHORE = BoundedSemaphore(BIOME_WORKERS)
+log.info("CPU scheduler: cores=%d biome_workers=%d", CPU_COUNT, BIOME_WORKERS)
 
 def _normalise_base_path(value: str) -> str:
     value = (value or "").strip()
@@ -202,7 +218,7 @@ MAX_STRUCT_W    = 32768
 MAX_STRUCT_H    = 32768
 MAX_STRONGHOLDS = 128
 MAX_STRUCTURES  = 512
-MAX_STRUCTURE_WORKERS = max(2, min(4, (os.cpu_count() or 4) // 2))
+MAX_STRUCTURE_WORKERS = _env_int("STRUCTURE_WORKERS", max(2, min(6, CPU_COUNT // 2)), 1, 32)
 MAX_SEARCH_ATTEMPTS = 250
 MAX_SEARCH_RESULTS  = 24
 MAX_SEARCH_RADIUS   = 6000
@@ -345,16 +361,27 @@ def _nearest_distance(points: list[dict], origin: dict) -> float | None:
 @lru_cache(maxsize=4096)
 def _biome_grid_cached(seed: int, mc: int, dim_id: int,
                        x: int, z: int, w: int, h: int, scale: int) -> tuple:
-    if dim_id == 0:
-        ptr = ctypes_call(lib.get_biome_grid, seed, mc, x, z, w, h, scale)
-    else:
-        ptr = ctypes_call(lib.get_biome_grid_dim, seed, mc, dim_id, x, z, w, h, scale)
+    with BIOME_SEMAPHORE:
+        if dim_id == 0:
+            ptr = ctypes_call(lib.get_biome_grid, seed, mc, x, z, w, h, scale)
+        else:
+            ptr = ctypes_call(lib.get_biome_grid_dim, seed, mc, dim_id, x, z, w, h, scale)
     if not ptr:
         raise RuntimeError("Biome generation failed")
     n = w * h
     grid = tuple(ptr[:n])
     lib.free_array(ptr)
     return grid
+
+
+def _binary_biome_response(grid: tuple):
+    payload = array("H", grid)
+    if sys.byteorder != "little":
+        payload.byteswap()
+    resp = app.response_class(payload.tobytes(), mimetype="application/octet-stream")
+    resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    resp.headers["X-Biome-Encoding"] = "uint16-le"
+    return resp
 
 
 @app.route('/')
@@ -390,9 +417,12 @@ def biomes():
     seed_str = request.args.get('seed', '0')
     version  = request.args.get('version', '1.20')
     dimension = _dimension_arg()
+    response_format = request.args.get("format", "json").strip().lower()
 
     if version not in MC_VERSIONS:
         return error(f"Unknown version: {version!r}. Valid: {list(MC_VERSIONS)}")
+    if response_format not in {"json", "bin"}:
+        return error("Invalid biome response format")
 
     if dimension != "overworld" and not HAS_DIM_BIOMES:
         return error("Biome generation for Nether/End requires a rebuilt libseedmap with get_biome_grid_dim", 501)
@@ -407,14 +437,17 @@ def biomes():
     seed = seed_to_int(seed_str)
 
     try:
-        grid = list(_biome_grid_cached(seed, mc, DIM_IDS[dimension], x, z, w, h, scale))
+        grid = _biome_grid_cached(seed, mc, DIM_IDS[dimension], x, z, w, h, scale)
     except RuntimeError as e:
         return error(str(e), 500)
+
+    if response_format == "bin":
+        return _binary_biome_response(grid)
 
     resp = jsonify({
         "seed": seed_str, "version": version, "dimension": dimension,
         "x": x, "z": z, "w": w, "h": h, "scale": scale,
-        "grid": grid,
+        "grid": list(grid),
     })
     resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
     return resp
