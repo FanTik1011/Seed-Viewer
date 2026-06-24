@@ -73,6 +73,47 @@ async function getJson(path, signal) {
   return data;
 }
 
+async function getBiomeTile(payload, signal) {
+  const params = new URLSearchParams({
+    seed: payload.seed,
+    version: payload.version,
+    dimension: payload.dimension || "overworld",
+    x: String(payload.x),
+    z: String(payload.z),
+    w: String(payload.w),
+    h: String(payload.h),
+    scale: String(payload.scale),
+    format: "bin"
+  });
+  const response = await fetch(`${API}/api/biomes?${params}`, { signal });
+  const contentType = response.headers.get("content-type") || "";
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || `Request failed with ${response.status}`);
+  }
+  if (contentType.includes("application/json")) {
+    const data = await response.json();
+    attachBiomeBitmap(data, payload);
+    return data;
+  }
+  const buffer = await response.arrayBuffer();
+  const expected = Math.max(0, Number(payload.w) * Number(payload.h));
+  const grid = new Uint16Array(buffer, 0, Math.min(expected, buffer.byteLength / 2));
+  const data = {
+    seed: payload.seed,
+    version: payload.version,
+    dimension: payload.dimension || "overworld",
+    x: payload.x,
+    z: payload.z,
+    w: payload.w,
+    h: payload.h,
+    scale: payload.scale,
+    grid
+  };
+  attachBiomeBitmap(data, payload);
+  return data;
+}
+
 self.onmessage = async event => {
   const { id, type, payload = {} } = event.data || {};
   if (!id || !type) return;
@@ -90,18 +131,7 @@ self.onmessage = async event => {
   try {
     let data;
     if (type === "biomeTile") {
-      const params = new URLSearchParams({
-        seed: payload.seed,
-        version: payload.version,
-        dimension: payload.dimension || "overworld",
-        x: String(payload.x),
-        z: String(payload.z),
-        w: String(payload.w),
-        h: String(payload.h),
-        scale: String(payload.scale)
-      });
-      data = await getJson(`/api/biomes?${params}`, controller?.signal);
-      attachBiomeBitmap(data, payload);
+      data = await getBiomeTile(payload, controller?.signal);
     } else if (type === "structures") {
       const params = new URLSearchParams({
         seed: payload.seed,
@@ -143,7 +173,9 @@ self.onmessage = async event => {
     } else {
       throw new Error(`Unknown worker task: ${type}`);
     }
-    const transfer = data?.bitmap ? [data.bitmap] : [];
+    const transfer = [];
+    if (data?.bitmap) transfer.push(data.bitmap);
+    if (data?.grid?.buffer instanceof ArrayBuffer) transfer.push(data.grid.buffer);
     self.postMessage({ id, ok: true, data }, transfer);
   } catch (err) {
     self.postMessage({ id, ok: false, error: err.message || "Worker request failed" });

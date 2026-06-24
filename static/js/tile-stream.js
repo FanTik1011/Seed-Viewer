@@ -50,11 +50,12 @@ function pumpTiles() {
     updateChunkPill();
     return;
   }
-  if (state.pendingTiles.size >= MAX_TILE_REQUESTS || !state.tileQueue.size) return;
+  const requestLimit = tileRequestLimit();
+  if (state.pendingTiles.size >= requestLimit || !state.tileQueue.size) return;
   refreshTilePriorities();
   const sorted = [...state.tileQueue.values()].sort((a, b) => a.priority - b.priority);
   let i = 0;
-  while (state.pendingTiles.size < MAX_TILE_REQUESTS && i < sorted.length) {
+  while (state.pendingTiles.size < requestLimit && i < sorted.length) {
     const next = sorted[i++];
     state.tileQueue.delete(tileKey(next.lod, next.tx, next.tz));
     loadTile(next);

@@ -367,6 +367,7 @@ function parseChunkbaseZoom(value) {
 async function loadCapabilities() {
   try {
     state.capabilities = await workerRequest("capabilities");
+    tuneWorkerPool();
   } catch (err) {
     console.warn("Capabilities unavailable", err);
   }

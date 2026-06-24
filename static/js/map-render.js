@@ -40,7 +40,7 @@ function render() {
 function prefetchAround(range) {
 
   if (!state.showBiomes || !dimensionCaps().biomes || mapIsMoving()) return;
-  if (state.pendingTiles.size > MAX_TILE_REQUESTS / 2 || state.tileQueue.size > MAX_TILE_QUEUE * .35) return;
+  if (state.pendingTiles.size > tileRequestLimit() / 2 || state.tileQueue.size > MAX_TILE_QUEUE * .35) return;
   for (let tz = range.tzMin - PREFETCH_MARGIN; tz <= range.tzMax + PREFETCH_MARGIN; tz++) {
     for (let tx = range.txMin - PREFETCH_MARGIN; tx <= range.txMax + PREFETCH_MARGIN; tx++) {
       if (tx >= range.txMin && tx <= range.txMax && tz >= range.tzMin && tz <= range.tzMax) continue;
