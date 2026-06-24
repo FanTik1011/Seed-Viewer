@@ -128,6 +128,7 @@ function goToCoordinates() {
     state.cursor = { x: Math.round(x), z: Math.round(z) };
   }
   scheduleUrlUpdate();
+  primeVisibleBiomeTiles();
   requestRender();
 }
 
@@ -169,6 +170,7 @@ function handlePointerMove(event) {
     }
     panSample = { x: state.viewX, z: state.viewZ, t: now };
     lastMoveT = now;
+    primeVisibleBiomeTiles();
     requestRender();
     return; 
   }
@@ -290,6 +292,7 @@ function bindEvents() {
     setZoomImmediate(DEFAULT_ZOOM);
     selectLocation({ type:"spawn", ...state.structures.spawn, ...STRUCT_META.spawn });
     scheduleUrlUpdate();
+    primeVisibleBiomeTiles();
     requestRender();
   });
   els.zoomRange.min = "0";
@@ -298,6 +301,7 @@ function bindEvents() {
   els.zoomRange.addEventListener("input", event => {
     setZoomImmediate(sliderToZoom(Number(event.target.value)));
     scheduleUrlUpdate();
+    primeVisibleBiomeTiles();
     requestRender();
   });
   els.version.addEventListener("change", () => {

@@ -19,6 +19,8 @@ function render() {
   cancelStaleTileRequests();
   dropStaleTileBuilds();
   if (detailedBiomes) {
+    queueCenterTiles(range);
+    pumpTiles();
     queueCoarseFallbacks(range);
     drawBiomes(range);
     prefetchAround(range);
@@ -49,6 +51,17 @@ function prefetchAround(range) {
   }
 }
 
+function primeVisibleBiomeTiles() {
+  if (!state.loaded || !state.showBiomes || !dimensionCaps().biomes) return;
+  const lod = pickLod();
+  const range = biomeTileRange(lod);
+  if (range.count > MAX_DRAW_TILES || range.tilePx < 10) return;
+  trimTileQueueToView(range);
+  cancelStaleTileRequests();
+  queueCenterTiles(range);
+  pumpTiles();
+}
+
 function queueCoarseFallbacks(range) {
   if (!state.showBiomes || !dimensionCaps().biomes || range.lod >= LODS.length - 1) return;
   const startX = range.txMin * range.blocks;
@@ -63,8 +76,17 @@ function queueCoarseFallbacks(range) {
   const tzMax = Math.floor(endZ / cfg.blocks);
   for (let tz = tzMin; tz <= tzMax; tz++) {
     for (let tx = txMin; tx <= txMax; tx++) {
-      queueTile(lod, tx, tz, true);
+      queueTile(lod, tx, tz, false);
     }
+  }
+}
+
+function queueCenterTiles(range) {
+  if (!state.showBiomes || !dimensionCaps().biomes) return;
+  let queued = 0;
+  for (const item of orderedTiles(range)) {
+    if (queued >= CENTER_TILE_ENQUEUE) break;
+    if (queueTile(range.lod, item.tx, item.tz, true, true)) queued++;
   }
 }
 
@@ -98,7 +120,9 @@ function drawBiomes(range, queueVisible = true) {
   const tilePx = cfg.blocks / state.zoom;
   const tiles = orderedTiles(range);
   let queuedThisFrame = 0;
-  const queueBudget = state.tileQueue.size > MAX_TILE_QUEUE_WHILE_LOADING ? 0 : MAX_TILE_ENQUEUE_PER_RENDER;
+  const queueBudget = state.tileQueue.size > MAX_TILE_QUEUE_WHILE_LOADING
+    ? CENTER_TILE_ENQUEUE
+    : MAX_TILE_ENQUEUE_PER_RENDER;
   for (const item of tiles) {
       const { tx, tz } = item;
       const key = tileKey(range.lod, tx, tz);
@@ -113,7 +137,7 @@ function drawBiomes(range, queueVisible = true) {
         drawPendingTile(pos, tilePx, item.dist);
       }
       if (queueVisible && state.showBiomes && !tile && queuedThisFrame < queueBudget) {
-        if (queueTile(range.lod, tx, tz, true)) queuedThisFrame++;
+        if (queueTile(range.lod, tx, tz, true, item.dist < 2.2)) queuedThisFrame++;
       }
   }
   if (queuedThisFrame >= queueBudget && queueBudget > 0) requestRender();

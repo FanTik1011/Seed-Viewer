@@ -1,28 +1,40 @@
-function queueTile(lod, tx, tz, visible = false) {
+function queueTile(lod, tx, tz, visible = false, center = false) {
   const key = tileKey(lod, tx, tz);
-  if (state.tiles.has(key) || state.pendingTiles.has(key)) return false;
-  const existing = state.tileQueue.get(key);
-  if (existing) {
-    if (visible && !existing.visible) {
-      existing.visible = true;
-      existing.priority = tilePriority(lod, tx, tz, true, existing.attempts || 0);
+  if (state.tiles.has(key)) return false;
+  const pending = state.pendingTiles.get(key);
+  if (pending) {
+    if (visible && !pending.visible || center && !pending.center) {
+      pending.visible = pending.visible || visible;
+      pending.center = pending.center || center;
+      pending.priority = tilePriority(lod, tx, tz, pending.visible, pending.attempts || 0, pending.center);
     }
     return false;
   }
-  const priority = tilePriority(lod, tx, tz, visible);
-  state.tileQueue.set(key, { lod, tx, tz, priority, visible, runId: state.runId, attempts: 0, seq: ++tileQueueSeq });
+  const existing = state.tileQueue.get(key);
+  if (existing) {
+    if (visible && !existing.visible || center && !existing.center) {
+      existing.visible = existing.visible || visible;
+      existing.center = existing.center || center;
+      existing.priority = tilePriority(lod, tx, tz, existing.visible, existing.attempts || 0, existing.center);
+    }
+    return false;
+  }
+  const priority = tilePriority(lod, tx, tz, visible, 0, center);
+  state.tileQueue.set(key, { lod, tx, tz, priority, visible, center, runId: state.runId, attempts: 0, seq: ++tileQueueSeq });
+  if (center) preemptForCenterTile(priority);
   if (state.tileQueue.size > MAX_TILE_QUEUE) pruneTileQueue();
   scheduleTilePump();
   return true;
 }
 
-function tilePriority(lod, tx, tz, visible = false, attempts = 0) {
+function tilePriority(lod, tx, tz, visible = false, attempts = 0, center = false) {
   const b = LODS[lod].blocks;
   const cx = tx * b + b / 2;
   const cz = tz * b + b / 2;
   const view = predictedTileView();
   let priority = Math.hypot(cx - view.x, cz - view.z) + attempts * TILE_RETRY_PENALTY;
   if (visible) priority -= VISIBLE_TILE_PRIORITY_BOOST;
+  if (center) priority -= CENTER_TILE_PRIORITY_BOOST;
   if (lod > 0) priority -= COARSE_TILE_PRIORITY_BOOST / lod;
   return priority;
 }
@@ -43,9 +55,28 @@ function tileKeepMargin(baseMargin) {
   return rapidPanActive() ? RAPID_PAN_CANCEL_MARGIN : baseMargin;
 }
 
+function preemptForCenterTile(candidatePriority) {
+  if (state.pendingTiles.size < tileRequestLimit()) return;
+  let worstKey = "";
+  let worstJob = null;
+  let worstPriority = candidatePriority;
+  for (const [key, pending] of state.pendingTiles) {
+    if (pending.center) continue;
+    const priority = tilePriority(pending.lod, pending.tx, pending.tz, pending.visible, pending.attempts || 0, pending.center);
+    if (priority > worstPriority) {
+      worstPriority = priority;
+      worstKey = key;
+      worstJob = pending;
+    }
+  }
+  if (!worstJob) return;
+  worstJob.request?.cancel?.();
+  state.pendingTiles.delete(worstKey);
+}
+
 function refreshTilePriorities() {
   for (const job of state.tileQueue.values()) {
-    job.priority = tilePriority(job.lod, job.tx, job.tz, job.visible, job.attempts || 0);
+    job.priority = tilePriority(job.lod, job.tx, job.tz, job.visible, job.attempts || 0, job.center);
   }
 }
 
@@ -166,8 +197,8 @@ function requeueTile(job) {
   const key = tileKey(job.lod, job.tx, job.tz);
   if (state.tiles.has(key) || state.pendingTiles.has(key) || state.tileQueue.has(key)) return;
   const attempts = (job.attempts || 0) + 1;
-  const priority = tilePriority(job.lod, job.tx, job.tz, job.visible, attempts);
-  state.tileQueue.set(key, { lod: job.lod, tx: job.tx, tz: job.tz, priority, visible: job.visible, runId: job.runId, attempts, seq: ++tileQueueSeq });
+  const priority = tilePriority(job.lod, job.tx, job.tz, job.visible, attempts, job.center);
+  state.tileQueue.set(key, { lod: job.lod, tx: job.tx, tz: job.tz, priority, visible: job.visible, center: job.center, runId: job.runId, attempts, seq: ++tileQueueSeq });
   if (state.tileQueue.size > MAX_TILE_QUEUE) pruneTileQueue();
 }
 
@@ -202,7 +233,7 @@ async function loadTile(job) {
     recordTileLatency(performance.now() - started);
     if (job.runId !== state.runId || !data.grid) return;
     if (!tileJobRelevant(job, TILE_RESULT_KEEP_MARGIN)) return;
-    tileBuildQueue.push({ key, grid: data.grid, bitmap: data.bitmap, lod: job.lod, tx: job.tx, tz: job.tz, runId: job.runId });
+    tileBuildQueue.push({ key, grid: data.grid, bitmap: data.bitmap, lod: job.lod, tx: job.tx, tz: job.tz, visible: job.visible, center: job.center, attempts: job.attempts || 0, runId: job.runId });
     queued = true;
     scheduleTileBuild();
   } catch (err) {
@@ -231,6 +262,10 @@ function scheduleTileBuild() {
 function buildQueuedTiles() {
   tileBuildPending = false;
   dropStaleTileBuilds();
+  tileBuildQueue.sort((a, b) =>
+    tilePriority(a.lod, a.tx, a.tz, a.visible, a.attempts || 0, a.center) -
+    tilePriority(b.lod, b.tx, b.tz, b.visible, b.attempts || 0, b.center)
+  );
   let processed = 0;
   let built = 0;
   const deadline = performance.now() + TILE_BUILD_FRAME_BUDGET;
