@@ -1,7 +1,6 @@
 function initWorker() {
   if (!("Worker" in window)) return;
   workerPool = [];
-  workerLoads = [];
   for (let i = 0; i < WORKER_POOL_SIZE; i++) {
     const w = new Worker(WORKER_URL);
     w.addEventListener("message", event => {
@@ -9,7 +8,6 @@ function initWorker() {
       const job = workerJobs.get(id);
       if (!job) return;
       workerJobs.delete(id);
-      workerLoads[job.workerIndex] = Math.max(0, (workerLoads[job.workerIndex] || 1) - 1);
       if (ok) {
         job.resolve(data);
       } else {
@@ -21,12 +19,10 @@ function initWorker() {
         if (job.worker === w) {
           job.reject(new Error(event.message || "Worker failed"));
           workerJobs.delete(id);
-          workerLoads[job.workerIndex] = Math.max(0, (workerLoads[job.workerIndex] || 1) - 1);
         }
       }
     });
     workerPool.push(w);
-    workerLoads.push(0);
   }
 }
 
@@ -37,23 +33,17 @@ function workerRequest(type, payload = {}) {
     promise.cancel = () => controller?.abort();
     return promise;
   }
-  let workerIndex = workerCursor % workerPool.length;
-  for (let i = 0; i < workerPool.length; i++) {
-    if ((workerLoads[i] || 0) < (workerLoads[workerIndex] || 0)) workerIndex = i;
-  }
-  workerCursor = (workerIndex + 1) % workerPool.length;
-  const w = workerPool[workerIndex];
+  const w = workerPool[workerCursor];
+  workerCursor = (workerCursor + 1) % workerPool.length;
   const id = ++workerSeq;
   const promise = new Promise((resolve, reject) => {
-    workerLoads[workerIndex] = (workerLoads[workerIndex] || 0) + 1;
-    workerJobs.set(id, { resolve, reject, worker: w, workerIndex, type, payload });
+    workerJobs.set(id, { resolve, reject, worker: w, type, payload });
     w.postMessage({ id, type, payload });
   });
   promise.cancel = () => {
     const job = workerJobs.get(id);
     if (!job) return;
     workerJobs.delete(id);
-    workerLoads[job.workerIndex] = Math.max(0, (workerLoads[job.workerIndex] || 1) - 1);
     w.postMessage({ id, type: "cancel" });
     job.reject(new DOMException("Request canceled", "AbortError"));
   };
@@ -64,7 +54,6 @@ function cancelWorkerJob(id, reason = "Request canceled") {
   const job = workerJobs.get(id);
   if (!job) return;
   workerJobs.delete(id);
-  workerLoads[job.workerIndex] = Math.max(0, (workerLoads[job.workerIndex] || 1) - 1);
   job.worker.postMessage({ id, type: "cancel" });
   job.reject(new DOMException(reason, "AbortError"));
 }
@@ -88,8 +77,7 @@ async function directRequest(type, payload = {}, signal = undefined) {
       z: String(payload.z),
       w: String(payload.w),
       h: String(payload.h),
-      scale: String(payload.scale),
-      format: "bin"
+      scale: String(payload.scale)
     });
     url = `${API}/api/biomes?${params}`;
   } else if (type === "structures") {
@@ -132,23 +120,7 @@ async function directRequest(type, payload = {}, signal = undefined) {
     url = `${API}/api/capabilities`;
   }
   const response = await fetch(url, { signal });
-  const contentType = response.headers.get("content-type") || "";
-  if (type === "biomeTile" && response.ok && !contentType.includes("application/json")) {
-    const buffer = await response.arrayBuffer();
-    const expected = Math.max(0, Number(payload.w) * Number(payload.h));
-    return {
-      seed: payload.seed,
-      version: payload.version,
-      dimension: payload.dimension || "overworld",
-      x: payload.x,
-      z: payload.z,
-      w: payload.w,
-      h: payload.h,
-      scale: payload.scale,
-      grid: new Uint16Array(buffer, 0, Math.min(expected, buffer.byteLength / 2))
-    };
-  }
-  const data = await response.json().catch(() => ({}));
+  const data = await response.json();
   if (!response.ok || data.error) throw new Error(data.error || "Request failed");
   return data;
 }

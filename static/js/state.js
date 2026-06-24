@@ -83,7 +83,6 @@ let dragView = null;
 let pointerMoved = false;
 let toastTimer = 0;
 let workerPool = [];
-let workerLoads = [];
 let workerCursor = 0;
 let workerSeq = 0;
 const workerJobs = new Map();

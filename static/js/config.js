@@ -2,21 +2,20 @@ const BASE_PATH = (window.SEED_VIEWER_BASE_PATH || "").replace(/\/$/, "");
 const API = BASE_PATH;
 const TILE_BLOCKS = 256;
 const WORKER_URL = `${BASE_PATH}/static/seed-worker.js`;
-const CPU_CORES = Math.max(2, navigator.hardwareConcurrency || 4);
 const SAMPLE_SCALE = 8;
 const TILE_SAMPLES = TILE_BLOCKS / SAMPLE_SCALE;
-const MAX_TILE_CACHE = 900;
-const MAX_TILE_QUEUE = 220;
-const MAX_TILE_REQUESTS = Math.max(3, Math.min(8, CPU_CORES - 1));
+const MAX_TILE_CACHE = 650;
+const MAX_TILE_QUEUE = 120;
+const MAX_TILE_REQUESTS = Math.max(2, Math.min(4, Math.floor((navigator.hardwareConcurrency || 4) / 2)));
 const MAX_DRAW_TILES = 240;
-const TILE_REQUEST_TIMEOUT = 15000;
+const TILE_REQUEST_TIMEOUT = 9000;
 
 const STRUCT_REQUEST_TIMEOUT = 15000;
 const MAX_TILE_ATTEMPTS = 3;
 const TILE_RETRY_PENALTY = 4000;
 const PREFETCH_MARGIN = 0;
-const MAX_TILE_ENQUEUE_PER_RENDER = 24;
-const MAX_TILE_QUEUE_WHILE_LOADING = 80;
+const MAX_TILE_ENQUEUE_PER_RENDER = 10;
+const MAX_TILE_QUEUE_WHILE_LOADING = 36;
 const TILE_VIEW_MARGIN = 0;
 const TILE_QUEUE_VIEW_MARGIN = 0;
 const TILE_RESULT_KEEP_MARGIN = 0;
@@ -46,11 +45,11 @@ const STRUCT_FAST_TYPES = [
   "Desert_Temple", "Jungle_Temple", "Witch_Hut", "Igloo"
 ];
 
-const WORKER_POOL_SIZE = Math.max(2, Math.min(6, CPU_CORES - 1));
+const WORKER_POOL_SIZE = Math.max(2, Math.min(3, Math.ceil((navigator.hardwareConcurrency || 4) / 3)));
 const VISIBLE_TILE_PRIORITY_BOOST = 1_000_000;
 const COARSE_TILE_PRIORITY_BOOST = 500_000;
-const TILE_BUILD_BATCH = 10;
-const TILE_BUILD_FRAME_BUDGET = 6;
+const TILE_BUILD_BATCH = 6;
+const TILE_BUILD_FRAME_BUDGET = 4;
 const TILE_PENDING_VIEW_MARGIN = 2;
 
 const MODERN_LODS = [
