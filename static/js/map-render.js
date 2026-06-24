@@ -19,6 +19,7 @@ function render() {
   cancelStaleTileRequests();
   dropStaleTileBuilds();
   if (detailedBiomes) {
+    queueCenterTileBulk(range);
     queueCenterTiles(range);
     pumpTiles();
     queueCoarseFallbacks(range);
@@ -58,6 +59,7 @@ function primeVisibleBiomeTiles() {
   if (range.count > MAX_DRAW_TILES || range.tilePx < 10) return;
   trimTileQueueToView(range);
   cancelStaleTileRequests();
+  queueCenterTileBulk(range);
   queueCenterTiles(range);
   pumpTiles();
 }

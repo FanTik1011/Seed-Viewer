@@ -55,6 +55,118 @@ function tileKeepMargin(baseMargin) {
   return rapidPanActive() ? RAPID_PAN_CANCEL_MARGIN : baseMargin;
 }
 
+function bulkTileKey(lod, txMin, txMax, tzMin, tzMax) {
+  return `${lod}:${txMin},${tzMin}-${txMax},${tzMax}`;
+}
+
+function queueCenterTileBulk(range) {
+  if (!state.loaded || !state.showBiomes || !dimensionCaps().biomes) return false;
+  const cfg = LODS[range.lod];
+  const maxTiles = Math.max(1, Math.floor(MAX_BIOME_REQUEST_SAMPLES / cfg.samples));
+  const size = Math.max(1, Math.min(maxTiles, CENTER_BULK_RADIUS * 2 + 1));
+  const width = range.txMax - range.txMin + 1;
+  const height = range.tzMax - range.tzMin + 1;
+  const cols = Math.min(size, width);
+  const rows = Math.min(size, height);
+  const centerTx = Math.floor(predictedTileView().x / cfg.blocks);
+  const centerTz = Math.floor(predictedTileView().z / cfg.blocks);
+  const txMin = clamp(centerTx - Math.floor(cols / 2), range.txMin, range.txMax - cols + 1);
+  const tzMin = clamp(centerTz - Math.floor(rows / 2), range.tzMin, range.tzMax - rows + 1);
+  const txMax = txMin + cols - 1;
+  const tzMax = tzMin + rows - 1;
+  const bulkKey = bulkTileKey(range.lod, txMin, txMax, tzMin, tzMax);
+  if (state.pendingTileBulk.has(bulkKey)) return false;
+
+  let missing = 0;
+  for (let tz = tzMin; tz <= tzMax; tz++) {
+    for (let tx = txMin; tx <= txMax; tx++) {
+      const key = tileKey(range.lod, tx, tz);
+      if (state.tiles.has(key)) continue;
+      missing++;
+    }
+  }
+  if (!missing) return false;
+  loadTileBulk({ lod: range.lod, txMin, txMax, tzMin, tzMax, runId: state.runId, key: bulkKey });
+  return true;
+}
+
+async function loadTileBulk(job) {
+  const cfg = LODS[job.lod];
+  const s = cfg.samples;
+  const cols = job.txMax - job.txMin + 1;
+  const rows = job.tzMax - job.tzMin + 1;
+  const started = performance.now();
+  let request = null;
+  let completed = false;
+  try {
+    request = workerRequest("biomeTile", {
+      seed: state.seed,
+      version: state.version,
+      dimension: state.dimension,
+      x: job.txMin * cfg.blocks,
+      z: job.tzMin * cfg.blocks,
+      w: cols * s,
+      h: rows * s,
+      scale: cfg.scale,
+      skipBitmap: true
+    });
+    state.pendingTileBulk.set(job.key, { ...job, request });
+    for (let tz = job.tzMin; tz <= job.tzMax; tz++) {
+      for (let tx = job.txMin; tx <= job.txMax; tx++) {
+        const key = tileKey(job.lod, tx, tz);
+        if (state.tiles.has(key)) continue;
+        state.tileQueue.delete(key);
+        state.pendingTiles.set(key, {
+          lod: job.lod, tx, tz, key, request,
+          visible: true, center: true, bulkKey: job.key,
+          runId: job.runId, attempts: 0
+        });
+      }
+    }
+    updateChunkPill();
+    const data = await withTimeout(request, TILE_REQUEST_TIMEOUT, "Tile request timed out");
+    recordTileLatency(performance.now() - started);
+    if (job.runId !== state.runId || !data.grid) return;
+    const totalW = cols * s;
+    let built = 0;
+    for (let tileZ = 0; tileZ < rows; tileZ++) {
+      for (let tileX = 0; tileX < cols; tileX++) {
+        const tx = job.txMin + tileX;
+        const tz = job.tzMin + tileZ;
+        const key = tileKey(job.lod, tx, tz);
+        const pending = state.pendingTiles.get(key);
+        if (!pending || pending.runId !== state.runId || !tileJobRelevant(pending, TILE_RESULT_KEEP_MARGIN)) continue;
+        const grid = new Uint16Array(s * s);
+        for (let lz = 0; lz < s; lz++) {
+          const src = (tileZ * s + lz) * totalW + tileX * s;
+          grid.set(data.grid.subarray(src, src + s), lz * s);
+        }
+        state.tiles.set(key, createTile(grid, job.lod, tx, tz));
+        state.pendingTiles.delete(key);
+        built++;
+      }
+    }
+    completed = true;
+    if (built) {
+      pruneTileCache();
+      requestRender();
+    }
+  } catch (err) {
+    if (err?.name !== "AbortError") console.warn("Bulk tile failed", err);
+  } finally {
+    state.pendingTileBulk.delete(job.key);
+    if (!completed) {
+      for (let tz = job.tzMin; tz <= job.tzMax; tz++) {
+        for (let tx = job.txMin; tx <= job.txMax; tx++) {
+          state.pendingTiles.delete(tileKey(job.lod, tx, tz));
+        }
+      }
+    }
+    updateChunkPill();
+    pumpTiles();
+  }
+}
+
 function preemptForCenterTile(candidatePriority) {
   if (state.pendingTiles.size < tileRequestLimit()) return;
   let worstKey = "";
@@ -155,11 +267,11 @@ function cancelStaleTileRequests() {
 }
 
 function cancelAllTileRequests() {
-  if (!state.pendingTiles.size) return;
   for (const pending of state.pendingTiles.values()) {
     pending.request?.cancel?.();
   }
   state.pendingTiles.clear();
+  state.pendingTileBulk.clear();
 }
 
 function dropStaleTileBuilds() {

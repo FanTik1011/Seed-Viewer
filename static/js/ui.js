@@ -325,7 +325,7 @@ function hydrateFromUrl() {
   const dimension = parseDimension(params.get("dimension"));
   const centerX = parseNumberParam(params.get("x"));
   const centerZ = parseNumberParam(params.get("z"));
-  const zoom = parseChunkbaseZoom(params.get("zoom"));
+  const zoom = parseSharedZoom(params.get("zoom"), platform);
   if (version && [...els.version.options].some(option => option.value === version)) {
     els.version.value = version;
   }
@@ -362,9 +362,11 @@ function parseNumberParam(value) {
   return Number.isFinite(n) ? n : NaN;
 }
 
-function parseChunkbaseZoom(value) {
+function parseSharedZoom(value, platform = "") {
   const n = parseNumberParam(value);
-  if (!Number.isFinite(n) || n <= 0) return NaN;
+  if (!Number.isFinite(n)) return NaN;
+  if (platform || n < 0) return clamp(4 / Math.pow(2, n), MIN_ZOOM, MAX_ZOOM);
+  if (n <= 0) return NaN;
   return clamp(4 / n, MIN_ZOOM, MAX_ZOOM);
 }
 

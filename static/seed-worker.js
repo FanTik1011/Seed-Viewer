@@ -93,7 +93,7 @@ async function getBiomeTile(payload, signal) {
   }
   if (contentType.includes("application/json")) {
     const data = await response.json();
-    attachBiomeBitmap(data, payload);
+    if (!payload.skipBitmap) attachBiomeBitmap(data, payload);
     return data;
   }
   const buffer = await response.arrayBuffer();
@@ -110,7 +110,7 @@ async function getBiomeTile(payload, signal) {
     scale: payload.scale,
     grid
   };
-  attachBiomeBitmap(data, payload);
+  if (!payload.skipBitmap) attachBiomeBitmap(data, payload);
   return data;
 }
 

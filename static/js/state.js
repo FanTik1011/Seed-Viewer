@@ -60,6 +60,7 @@ const state = {
   tiles: new Map(),
   tileQueue: new Map(),
   pendingTiles: new Map(),
+  pendingTileBulk: new Map(),
   tileLatencyMs: 0,
   structures: {},
   structFetched: new Set(),
