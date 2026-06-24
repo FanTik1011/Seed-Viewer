@@ -24,6 +24,15 @@ const els = {
   layerList: document.getElementById("layer-list"),
   structList: document.getElementById("struct-list"),
   structTotal: document.getElementById("struct-total"),
+  biomeList: document.getElementById("biome-list"),
+  finderPanel: document.getElementById("finder-panel"),
+  finderBiome: document.getElementById("finder-biome-select"),
+  finderStructure: document.getElementById("finder-structure-select"),
+  finderBtn: document.getElementById("find-biome-btn"),
+  finderClose: document.getElementById("close-finder"),
+  finderOpen: document.getElementById("open-finder-btn"),
+  finderStatus: document.getElementById("finder-status"),
+  finderResults: document.getElementById("finder-results"),
   selectedIcon: document.getElementById("selected-icon"),
   selectedLabel: document.getElementById("selected-label"),
   selectedX: document.getElementById("selected-x"),
@@ -60,14 +69,15 @@ const state = {
   tiles: new Map(),
   tileQueue: new Map(),
   pendingTiles: new Map(),
-  pendingTileBulk: new Map(),
-  tileLatencyMs: 0,
   structures: {},
   structFetched: new Set(),
   structSeen: {},
   showBiomes: true,
   showGrid: true,
   showAxes: false,
+  biomeVis: Object.fromEntries(Object.keys(BIOME_NAMES).map(id => [id, true])),
+  finderResults: [],
+  finderBusy: false,
   cursor: { x: 0, z: 0 },
   selected: null,
   capabilities: null,
@@ -85,7 +95,6 @@ let dragView = null;
 let pointerMoved = false;
 let toastTimer = 0;
 let workerPool = [];
-let workerLoads = [];
 let workerCursor = 0;
 let workerSeq = 0;
 const workerJobs = new Map();
@@ -94,7 +103,6 @@ let autoLoadTimer = 0;
 let tileBuildPending = false;
 let tilePumpPending = false;
 const tileBuildQueue = [];
-let tileQueueSeq = 0;
 const markerImageCache = new Map();
 const labelWidthCache = new Map();
 let markerCache = null;

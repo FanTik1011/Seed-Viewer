@@ -107,8 +107,14 @@ function scheduleAutoLoad(delay = 900) {
 function toggleBottomMenu() {
   const collapsed = !els.sidebar.classList.contains("is-collapsed");
   els.sidebar.classList.toggle("is-collapsed", collapsed);
+  document.body.classList.toggle("sidebar-hidden", collapsed);
   els.menuToggle.setAttribute("aria-expanded", String(!collapsed));
-  els.menuToggle.title = collapsed ? "Expand bottom menu" : "Collapse bottom menu";
+  els.menuToggle.title = collapsed ? "Expand sidebar" : "Collapse sidebar";
+}
+
+function setFinderVisible(visible) {
+  els.finderPanel.classList.toggle("is-hidden", !visible);
+  els.finderOpen.classList.toggle("visible", !visible);
 }
 
 function goToCoordinates() {
@@ -128,7 +134,6 @@ function goToCoordinates() {
     state.cursor = { x: Math.round(x), z: Math.round(z) };
   }
   scheduleUrlUpdate();
-  primeVisibleBiomeTiles();
   requestRender();
 }
 
@@ -170,7 +175,6 @@ function handlePointerMove(event) {
     }
     panSample = { x: state.viewX, z: state.viewZ, t: now };
     lastMoveT = now;
-    primeVisibleBiomeTiles();
     requestRender();
     return; 
   }
@@ -276,6 +280,21 @@ function bindEvents() {
   document.getElementById("close-popover").addEventListener("click", closeLocationPopover);
   document.getElementById("select-all-features").addEventListener("click", () => setAllFeatures(true));
   document.getElementById("deselect-all-features").addEventListener("click", () => setAllFeatures(false));
+  document.getElementById("select-all-biomes").addEventListener("click", () => setAllBiomes(true));
+  document.getElementById("deselect-all-biomes").addEventListener("click", () => setAllBiomes(false));
+  els.finderBtn.addEventListener("click", searchMatchingSeeds);
+  els.finderBiome.addEventListener("change", () => {
+    state.finderResults = [];
+    els.finderResults.innerHTML = "";
+    updateFinderHint();
+  });
+  els.finderStructure.addEventListener("change", () => {
+    state.finderResults = [];
+    els.finderResults.innerHTML = "";
+    updateFinderHint();
+  });
+  els.finderClose.addEventListener("click", () => setFinderVisible(false));
+  els.finderOpen.addEventListener("click", () => setFinderVisible(true));
   document.getElementById("go-btn").addEventListener("click", goToCoordinates);
   els.gotoX.addEventListener("keydown", event => { if (event.key === "Enter") goToCoordinates(); });
   els.gotoZ.addEventListener("keydown", event => { if (event.key === "Enter") goToCoordinates(); });
@@ -292,7 +311,6 @@ function bindEvents() {
     setZoomImmediate(DEFAULT_ZOOM);
     selectLocation({ type:"spawn", ...state.structures.spawn, ...STRUCT_META.spawn });
     scheduleUrlUpdate();
-    primeVisibleBiomeTiles();
     requestRender();
   });
   els.zoomRange.min = "0";
@@ -301,7 +319,6 @@ function bindEvents() {
   els.zoomRange.addEventListener("input", event => {
     setZoomImmediate(sliderToZoom(Number(event.target.value)));
     scheduleUrlUpdate();
-    primeVisibleBiomeTiles();
     requestRender();
   });
   els.version.addEventListener("change", () => {
@@ -325,7 +342,7 @@ function hydrateFromUrl() {
   const dimension = parseDimension(params.get("dimension"));
   const centerX = parseNumberParam(params.get("x"));
   const centerZ = parseNumberParam(params.get("z"));
-  const zoom = parseSharedZoom(params.get("zoom"), platform);
+  const zoom = parseChunkbaseZoom(params.get("zoom"));
   if (version && [...els.version.options].some(option => option.value === version)) {
     els.version.value = version;
   }
@@ -362,18 +379,15 @@ function parseNumberParam(value) {
   return Number.isFinite(n) ? n : NaN;
 }
 
-function parseSharedZoom(value, platform = "") {
+function parseChunkbaseZoom(value) {
   const n = parseNumberParam(value);
-  if (!Number.isFinite(n)) return NaN;
-  if (platform || n < 0) return clamp(4 / Math.pow(2, n), MIN_ZOOM, MAX_ZOOM);
-  if (n <= 0) return NaN;
+  if (!Number.isFinite(n) || n <= 0) return NaN;
   return clamp(4 / n, MIN_ZOOM, MAX_ZOOM);
 }
 
 async function loadCapabilities() {
   try {
     state.capabilities = await workerRequest("capabilities");
-    tuneWorkerPool();
   } catch (err) {
     console.warn("Capabilities unavailable", err);
   }

@@ -2,27 +2,23 @@ const BASE_PATH = (window.SEED_VIEWER_BASE_PATH || "").replace(/\/$/, "");
 const API = BASE_PATH;
 const TILE_BLOCKS = 256;
 const WORKER_URL = `${BASE_PATH}/static/seed-worker.js`;
-const CPU_CORES = Math.max(2, navigator.hardwareConcurrency || 4);
 const SAMPLE_SCALE = 8;
 const TILE_SAMPLES = TILE_BLOCKS / SAMPLE_SCALE;
-const MAX_BIOME_REQUEST_SAMPLES = 256;
-const MAX_TILE_CACHE = 1600;
-const MAX_TILE_QUEUE = 320;
-const MAX_TILE_REQUESTS = Math.max(4, Math.min(10, CPU_CORES));
+const MAX_TILE_CACHE = 650;
+const MAX_TILE_QUEUE = 120;
+const MAX_TILE_REQUESTS = Math.max(2, Math.min(4, Math.floor((navigator.hardwareConcurrency || 4) / 2)));
 const MAX_DRAW_TILES = 240;
-const TILE_REQUEST_TIMEOUT = 15000;
+const TILE_REQUEST_TIMEOUT = 9000;
 
 const STRUCT_REQUEST_TIMEOUT = 15000;
 const MAX_TILE_ATTEMPTS = 3;
 const TILE_RETRY_PENALTY = 4000;
-const PREFETCH_MARGIN = 1;
-const MAX_TILE_ENQUEUE_PER_RENDER = 48;
-const CENTER_TILE_ENQUEUE = 16;
-const CENTER_BULK_RADIUS = 1;
-const MAX_TILE_QUEUE_WHILE_LOADING = 150;
+const PREFETCH_MARGIN = 0;
+const MAX_TILE_ENQUEUE_PER_RENDER = 10;
+const MAX_TILE_QUEUE_WHILE_LOADING = 36;
 const TILE_VIEW_MARGIN = 0;
-const TILE_QUEUE_VIEW_MARGIN = 1;
-const TILE_RESULT_KEEP_MARGIN = 1;
+const TILE_QUEUE_VIEW_MARGIN = 0;
+const TILE_RESULT_KEEP_MARGIN = 0;
 
 const MARKER_LITE_LIMIT = 200;
 const MARKER_LABEL_LIMIT = 50;
@@ -49,16 +45,12 @@ const STRUCT_FAST_TYPES = [
   "Desert_Temple", "Jungle_Temple", "Witch_Hut", "Igloo"
 ];
 
-const WORKER_POOL_SIZE = Math.max(2, Math.min(8, CPU_CORES));
+const WORKER_POOL_SIZE = Math.max(2, Math.min(3, Math.ceil((navigator.hardwareConcurrency || 4) / 3)));
 const VISIBLE_TILE_PRIORITY_BOOST = 1_000_000;
-const COARSE_TILE_PRIORITY_BOOST = 300_000;
-const OVERVIEW_TILE_PRIORITY_BOOST = 900_000;
-const CENTER_TILE_PRIORITY_BOOST = 350_000;
-const TILE_BUILD_BATCH = 18;
-const TILE_BUILD_FRAME_BUDGET = 8;
+const COARSE_TILE_PRIORITY_BOOST = 500_000;
+const TILE_BUILD_BATCH = 6;
+const TILE_BUILD_FRAME_BUDGET = 4;
 const TILE_PENDING_VIEW_MARGIN = 2;
-const RAPID_PAN_CANCEL_MARGIN = 0;
-const MOVING_TILE_LOOKAHEAD_MS = 140;
 
 const MODERN_LODS = [
   { blocks: 256,   samples: 32,  scale: 8  },
@@ -83,24 +75,3 @@ const MANUAL_SCAN_RADIUS = 3072;
 const MAP_BG = "#17158b";
 const EMPTY_TILE_COLORS = ["#17158b", "#17158b"];
 const UNKNOWN_BIOME_RGB = [38, 45, 41];
-
-function performanceHints() {
-  return state.capabilities?.performance || {};
-}
-
-function tileRequestLimit() {
-  const hinted = Number(performanceHints().tileRequests);
-  const serverLimit = Number.isFinite(hinted) && hinted > 0 ? hinted : MAX_TILE_REQUESTS;
-  let limit = Math.max(1, Math.min(MAX_TILE_REQUESTS, Math.floor(serverLimit)));
-  const latency = Number(state.tileLatencyMs || 0);
-  if (latency > 2600) limit = Math.min(limit, 2);
-  else if (latency > 1400) limit = Math.min(limit, 4);
-  if (navigator.connection?.saveData) limit = Math.min(limit, 3);
-  return limit;
-}
-
-function workerPoolTarget() {
-  const hinted = Number(performanceHints().workerPool);
-  const serverLimit = Number.isFinite(hinted) && hinted > 0 ? hinted : WORKER_POOL_SIZE;
-  return Math.max(1, Math.min(WORKER_POOL_SIZE, Math.floor(serverLimit)));
-}

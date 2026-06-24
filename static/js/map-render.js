@@ -19,10 +19,6 @@ function render() {
   cancelStaleTileRequests();
   dropStaleTileBuilds();
   if (detailedBiomes) {
-    queueViewportOverview(range);
-    queueCenterTileBulk(range);
-    queueCenterTiles(range);
-    pumpTiles();
     queueCoarseFallbacks(range);
     drawBiomes(range);
     prefetchAround(range);
@@ -44,44 +40,11 @@ function render() {
 function prefetchAround(range) {
 
   if (!state.showBiomes || !dimensionCaps().biomes || mapIsMoving()) return;
-  if (state.pendingTiles.size > tileRequestLimit() / 2 || state.tileQueue.size > MAX_TILE_QUEUE * .35) return;
+  if (state.pendingTiles.size > MAX_TILE_REQUESTS / 2 || state.tileQueue.size > MAX_TILE_QUEUE * .35) return;
   for (let tz = range.tzMin - PREFETCH_MARGIN; tz <= range.tzMax + PREFETCH_MARGIN; tz++) {
     for (let tx = range.txMin - PREFETCH_MARGIN; tx <= range.txMax + PREFETCH_MARGIN; tx++) {
       if (tx >= range.txMin && tx <= range.txMax && tz >= range.tzMin && tz <= range.tzMax) continue;
       queueTile(range.lod, tx, tz);
-    }
-  }
-}
-
-function primeVisibleBiomeTiles() {
-  if (!state.loaded || !state.showBiomes || !dimensionCaps().biomes) return;
-  const lod = pickLod();
-  const range = biomeTileRange(lod);
-  if (range.count > MAX_DRAW_TILES || range.tilePx < 10) return;
-  trimTileQueueToView(range);
-  cancelStaleTileRequests();
-  queueViewportOverview(range);
-  queueCenterTileBulk(range);
-  queueCenterTiles(range);
-  pumpTiles();
-}
-
-function queueViewportOverview(range) {
-  if (!state.showBiomes || !dimensionCaps().biomes || range.lod >= LODS.length - 1) return;
-  const overviewLod = Math.min(LODS.length - 1, range.lod + 2);
-  const fine = LODS[range.lod];
-  const coarse = LODS[overviewLod];
-  const startX = range.txMin * fine.blocks;
-  const endX = (range.txMax + 1) * fine.blocks - 1;
-  const startZ = range.tzMin * fine.blocks;
-  const endZ = (range.tzMax + 1) * fine.blocks - 1;
-  const txMin = Math.floor(startX / coarse.blocks);
-  const txMax = Math.floor(endX / coarse.blocks);
-  const tzMin = Math.floor(startZ / coarse.blocks);
-  const tzMax = Math.floor(endZ / coarse.blocks);
-  for (let tz = tzMin; tz <= tzMax; tz++) {
-    for (let tx = txMin; tx <= txMax; tx++) {
-      queueTile(overviewLod, tx, tz, true, false, true);
     }
   }
 }
@@ -100,17 +63,8 @@ function queueCoarseFallbacks(range) {
   const tzMax = Math.floor(endZ / cfg.blocks);
   for (let tz = tzMin; tz <= tzMax; tz++) {
     for (let tx = txMin; tx <= txMax; tx++) {
-      queueTile(lod, tx, tz, false);
+      queueTile(lod, tx, tz, true);
     }
-  }
-}
-
-function queueCenterTiles(range) {
-  if (!state.showBiomes || !dimensionCaps().biomes) return;
-  let queued = 0;
-  for (const item of orderedTiles(range)) {
-    if (queued >= CENTER_TILE_ENQUEUE) break;
-    if (queueTile(range.lod, item.tx, item.tz, true, true)) queued++;
   }
 }
 
@@ -144,9 +98,7 @@ function drawBiomes(range, queueVisible = true) {
   const tilePx = cfg.blocks / state.zoom;
   const tiles = orderedTiles(range);
   let queuedThisFrame = 0;
-  const queueBudget = state.tileQueue.size > MAX_TILE_QUEUE_WHILE_LOADING
-    ? CENTER_TILE_ENQUEUE
-    : MAX_TILE_ENQUEUE_PER_RENDER;
+  const queueBudget = state.tileQueue.size > MAX_TILE_QUEUE_WHILE_LOADING ? 0 : MAX_TILE_ENQUEUE_PER_RENDER;
   for (const item of tiles) {
       const { tx, tz } = item;
       const key = tileKey(range.lod, tx, tz);
@@ -158,10 +110,10 @@ function drawBiomes(range, queueVisible = true) {
       } else if (state.showBiomes && drawFallbackTile(range.lod, tx, tz, pos, tilePx)) {
 
       } else {
-        drawPendingTile(pos, tilePx);
+        drawPendingTile(pos, tilePx, item.dist);
       }
       if (queueVisible && state.showBiomes && !tile && queuedThisFrame < queueBudget) {
-        if (queueTile(range.lod, tx, tz, true, item.dist < 2.2)) queuedThisFrame++;
+        if (queueTile(range.lod, tx, tz, true)) queuedThisFrame++;
       }
   }
   if (queuedThisFrame >= queueBudget && queueBudget > 0) requestRender();
@@ -170,6 +122,9 @@ function drawBiomes(range, queueVisible = true) {
 function drawSeedmapLoadingMap(range) {
   ctx.save();
   drawBiomes(range, false);
+  ctx.strokeStyle = "rgba(255,255,255,.18)";
+  ctx.lineWidth = 1;
+  drawLoadedTileOutline(range);
   ctx.restore();
 }
 
@@ -185,9 +140,10 @@ function orderedTiles(range) {
   return tiles.sort((a, b) => a.dist - b.dist);
 }
 
-function drawPendingTile(pos, tilePx) {
+function drawPendingTile(pos, tilePx, dist) {
   if (tilePx < 18) return;
-  ctx.fillStyle = MAP_BG;
+  const alpha = clamp(.08 - dist * .006, .018, .055);
+  ctx.fillStyle = `rgba(255,255,255,${alpha})`;
   ctx.fillRect(pos.x, pos.y, tilePx + 1, tilePx + 1);
 }
 

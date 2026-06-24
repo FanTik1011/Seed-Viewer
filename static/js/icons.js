@@ -24,6 +24,9 @@ function bootIcons() {
   setIcon("copy-popover-tp", "target", "/tp");
   setIcon("reset-view-btn", "target", "Reset view");
   setIcon("go-btn", "play", "Go to location");
+  setIcon("find-biome-btn", "search", "Find seeds");
+  setIcon("close-finder", "close");
+  setIcon("open-finder-btn", "search", "Seed finder");
   setIcon("close-popover", "close");
   setIcon("share-url-btn", "link", "Share");
 }

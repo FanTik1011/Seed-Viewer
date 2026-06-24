@@ -6,36 +6,14 @@ import sys
 import random
 import logging
 import math
-from array import array
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
-from threading import BoundedSemaphore
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
 log = logging.getLogger(__name__)
-
-
-def _env_int(name: str, default: int, lo: int, hi: int) -> int:
-    try:
-        value = int(os.environ.get(name, default))
-    except (TypeError, ValueError):
-        value = default
-    return max(lo, min(hi, value))
-
-
-CPU_COUNT = os.cpu_count() or 4
-BIOME_WORKERS = _env_int("BIOME_WORKERS", max(1, min(8, CPU_COUNT - 1)), 1, 32)
-CLIENT_TILE_REQUESTS = _env_int("CLIENT_TILE_REQUESTS", max(1, min(6, BIOME_WORKERS)), 1, 16)
-BIOME_SEMAPHORE = BoundedSemaphore(BIOME_WORKERS)
-log.info(
-    "CPU scheduler: cores=%d biome_workers=%d client_tile_requests=%d",
-    CPU_COUNT,
-    BIOME_WORKERS,
-    CLIENT_TILE_REQUESTS,
-)
 
 def _normalise_base_path(value: str) -> str:
     value = (value or "").strip()
@@ -224,10 +202,11 @@ MAX_STRUCT_W    = 32768
 MAX_STRUCT_H    = 32768
 MAX_STRONGHOLDS = 128
 MAX_STRUCTURES  = 512
-MAX_STRUCTURE_WORKERS = _env_int("STRUCTURE_WORKERS", max(2, min(6, CPU_COUNT // 2)), 1, 32)
+MAX_STRUCTURE_WORKERS = max(2, min(4, (os.cpu_count() or 4) // 2))
 MAX_SEARCH_ATTEMPTS = 250
 MAX_SEARCH_RESULTS  = 24
 MAX_SEARCH_RADIUS   = 6000
+MAX_BIOME_FIND_SAMPLES = 65000
 
 def seed_to_int(seed_str: str) -> int:
     s = seed_str.strip()
@@ -364,30 +343,73 @@ def _nearest_distance(points: list[dict], origin: dict) -> float | None:
     return min(((p["x"] - ox) ** 2 + (p["z"] - oz) ** 2) ** 0.5 for p in points)
 
 
+def _find_nearest_biome_points(seed: int, mc: int, dim_id: int, biome_id: int,
+                               origin: dict, radius: int, step: int, limit: int) -> tuple[list[dict], int, int]:
+    sample_w = math.floor((radius * 2) / step) + 1
+    sample_h = sample_w
+    total = sample_w * sample_h
+    if total > MAX_BIOME_FIND_SAMPLES:
+        step = max(step, math.ceil((radius * 2) / math.sqrt(MAX_BIOME_FIND_SAMPLES)))
+        step = int(math.ceil(step / 16) * 16)
+        sample_w = math.floor((radius * 2) / step) + 1
+        sample_h = sample_w
+
+    start_x = origin["x"] - radius
+    start_z = origin["z"] - radius
+    matches = []
+    chunk = 128
+
+    for sy in range(0, sample_h, chunk):
+        h = min(chunk, sample_h - sy)
+        for sx in range(0, sample_w, chunk):
+            w = min(chunk, sample_w - sx)
+            block_x = start_x + sx * step
+            block_z = start_z + sy * step
+            grid = _biome_grid_cached(seed, mc, dim_id, block_x, block_z, w, h, step)
+            for i, value in enumerate(grid):
+                if value != biome_id:
+                    continue
+                lx = i % w
+                lz = i // w
+                x = block_x + lx * step
+                z = block_z + lz * step
+                dist = math.hypot(x - origin["x"], z - origin["z"])
+                if dist > radius:
+                    continue
+                matches.append({"x": x, "z": z, "distance": round(dist)})
+
+    matches.sort(key=lambda p: (p["distance"], abs(p["x"] - origin["x"]) + abs(p["z"] - origin["z"])))
+    return matches[:limit], sample_w * sample_h, step
+
+
+def _parse_biome_ids(raw: str) -> list[int]:
+    ids = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            value = int(part)
+        except ValueError:
+            continue
+        if 0 <= value <= 255:
+            ids.append(value)
+    return ids
+
+
 @lru_cache(maxsize=4096)
 def _biome_grid_cached(seed: int, mc: int, dim_id: int,
                        x: int, z: int, w: int, h: int, scale: int) -> tuple:
-    with BIOME_SEMAPHORE:
-        if dim_id == 0:
-            ptr = ctypes_call(lib.get_biome_grid, seed, mc, x, z, w, h, scale)
-        else:
-            ptr = ctypes_call(lib.get_biome_grid_dim, seed, mc, dim_id, x, z, w, h, scale)
+    if dim_id == 0:
+        ptr = ctypes_call(lib.get_biome_grid, seed, mc, x, z, w, h, scale)
+    else:
+        ptr = ctypes_call(lib.get_biome_grid_dim, seed, mc, dim_id, x, z, w, h, scale)
     if not ptr:
         raise RuntimeError("Biome generation failed")
     n = w * h
     grid = tuple(ptr[:n])
     lib.free_array(ptr)
     return grid
-
-
-def _binary_biome_response(grid: tuple):
-    payload = array("H", grid)
-    if sys.byteorder != "little":
-        payload.byteswap()
-    resp = app.response_class(payload.tobytes(), mimetype="application/octet-stream")
-    resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
-    resp.headers["X-Biome-Encoding"] = "uint16-le"
-    return resp
 
 
 @app.route('/')
@@ -409,13 +431,6 @@ def capabilities():
         "structures": {
             "overworld": _available_structures("1.21", "overworld") + ["Stronghold", "spawn"],
         },
-        "performance": {
-            "cpuCores": CPU_COUNT,
-            "biomeWorkers": BIOME_WORKERS,
-            "structureWorkers": MAX_STRUCTURE_WORKERS,
-            "tileRequests": CLIENT_TILE_REQUESTS,
-            "workerPool": max(2, min(6, CLIENT_TILE_REQUESTS)),
-        },
     })
 
 
@@ -430,12 +445,9 @@ def biomes():
     seed_str = request.args.get('seed', '0')
     version  = request.args.get('version', '1.20')
     dimension = _dimension_arg()
-    response_format = request.args.get("format", "json").strip().lower()
 
     if version not in MC_VERSIONS:
         return error(f"Unknown version: {version!r}. Valid: {list(MC_VERSIONS)}")
-    if response_format not in {"json", "bin"}:
-        return error("Invalid biome response format")
 
     if dimension != "overworld" and not HAS_DIM_BIOMES:
         return error("Biome generation for Nether/End requires a rebuilt libseedmap with get_biome_grid_dim", 501)
@@ -450,19 +462,70 @@ def biomes():
     seed = seed_to_int(seed_str)
 
     try:
-        grid = _biome_grid_cached(seed, mc, DIM_IDS[dimension], x, z, w, h, scale)
+        grid = list(_biome_grid_cached(seed, mc, DIM_IDS[dimension], x, z, w, h, scale))
     except RuntimeError as e:
         return error(str(e), 500)
-
-    if response_format == "bin":
-        return _binary_biome_response(grid)
 
     resp = jsonify({
         "seed": seed_str, "version": version, "dimension": dimension,
         "x": x, "z": z, "w": w, "h": h, "scale": scale,
-        "grid": list(grid),
+        "grid": grid,
     })
     resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    return resp
+
+
+@app.route('/api/find_biome')
+def find_biome():
+    seed_str = request.args.get('seed', '0')
+    version = request.args.get('version', '1.20')
+    dimension = _dimension_arg()
+
+    if version not in MC_VERSIONS:
+        return error(f"Unknown version: {version!r}. Valid: {list(MC_VERSIONS)}")
+    if dimension != "overworld" and not HAS_DIM_BIOMES:
+        return error("Biome search for Nether/End requires a rebuilt libseedmap with get_biome_grid_dim", 501)
+
+    biome_id = _int_arg('biome', 1, lo=0, hi=255)
+    radius = _int_arg('radius', 3000, lo=256, hi=MAX_SEARCH_RADIUS)
+    step = _int_arg('step', 64, lo=16, hi=256)
+    limit = _int_arg('limit', 8, lo=1, hi=MAX_SEARCH_RESULTS)
+    origin_mode = request.args.get('origin', 'spawn')
+
+    mc = MC_VERSIONS[version]
+    seed = seed_to_int(seed_str)
+    if origin_mode == "spawn":
+        try:
+            p = ctypes_call(lib.get_spawn, seed, mc)
+        except RuntimeError as e:
+            return error(str(e), 500)
+        origin = {"x": p.x, "z": p.z}
+    else:
+        origin = {
+            "x": _int_arg('x', 0, lo=-30_000_000, hi=30_000_000),
+            "z": _int_arg('z', 0, lo=-30_000_000, hi=30_000_000),
+        }
+
+    try:
+        results, checked, used_step = _find_nearest_biome_points(
+            seed, mc, DIM_IDS[dimension], biome_id, origin, radius, step, limit
+        )
+    except RuntimeError as e:
+        return error(str(e), 500)
+
+    resp = jsonify({
+        "seed": seed_str,
+        "version": version,
+        "dimension": dimension,
+        "biome": biome_id,
+        "origin": origin,
+        "originMode": origin_mode,
+        "radius": radius,
+        "step": used_step,
+        "checked": checked,
+        "results": results,
+    })
+    resp.headers["Cache-Control"] = "no-store"
     return resp
 
 
@@ -610,14 +673,17 @@ def search_seeds():
         return error(f"Unknown version: {version!r}")
 
     attempts = _int_arg('attempts', 80, lo=1, hi=MAX_SEARCH_ATTEMPTS)
-    radius = _int_arg('radius', 2000, lo=128, hi=MAX_SEARCH_RADIUS)
+    default_radius = _int_arg('radius', 1000, lo=128, hi=MAX_SEARCH_RADIUS)
+    structure_radius = _int_arg('structure_radius', default_radius, lo=128, hi=MAX_SEARCH_RADIUS)
+    biome_radius = _int_arg('biome_radius', default_radius, lo=256, hi=MAX_SEARCH_RADIUS)
     limit = _int_arg('limit', 8, lo=1, hi=MAX_SEARCH_RESULTS)
 
     available = set(_available_structures(version, "overworld"))
-    raw_required = request.args.get('required', 'Village')
+    raw_required = request.args.get('required', '')
     required = [name for name in raw_required.split(',') if name in available]
-    if not required:
-        return error("Choose at least one valid structure for this version")
+    required_biomes = _parse_biome_ids(request.args.get('biomes', ''))
+    if not required and not required_biomes:
+        return error("Choose at least one biome or valid structure for this version")
 
     mc = MC_VERSIONS[version]
     candidates = [random.randint(-(2**63), 2**63 - 1) for _ in range(attempts)]
@@ -625,25 +691,37 @@ def search_seeds():
     def evaluate(seed: int):
         spawn_pos = ctypes_call(lib.get_spawn, seed, mc)
         spawn = {"x": spawn_pos.x, "z": spawn_pos.z}
-        x = spawn["x"] - radius
-        z = spawn["z"] - radius
-        size = radius * 2
 
         found = {}
         nearest = {}
+        found_biomes = {}
+        nearest_biomes = {}
         score = 0.0
 
         for name in required:
+            x = spawn["x"] - structure_radius
+            z = spawn["z"] - structure_radius
+            size = structure_radius * 2
             points = _points_for_structure(seed, mc, name, x, z, size, size, "overworld")
             if not points:
                 return None
             dist = _nearest_distance(points, spawn)
-            if dist is None or dist > radius * 1.42:
+            if dist is None or dist > structure_radius * 1.42:
                 return None
             points.sort(key=lambda p: (p["x"] - spawn["x"]) ** 2 + (p["z"] - spawn["z"]) ** 2)
             found[name] = points[:8]
             nearest[name] = round(dist)
             score += dist
+
+        for biome_id in required_biomes:
+            points, _, used_step = _find_nearest_biome_points(
+                seed, mc, DIM_IDS["overworld"], biome_id, spawn, biome_radius, 64, 4
+            )
+            if not points:
+                return None
+            nearest_biomes[str(biome_id)] = points[0]["distance"]
+            found_biomes[str(biome_id)] = points
+            score += points[0]["distance"] + used_step * 0.1
 
         return {
             "seed": str(seed),
@@ -651,6 +729,8 @@ def search_seeds():
             "score": round(score),
             "nearest": nearest,
             "structures": found,
+            "nearestBiomes": nearest_biomes,
+            "biomes": found_biomes,
         }
 
     matches = []
@@ -669,8 +749,11 @@ def search_seeds():
     return jsonify({
         "version": version,
         "attempts": attempts,
-        "radius": radius,
+        "radius": max(structure_radius, biome_radius),
+        "structureRadius": structure_radius,
+        "biomeRadius": biome_radius,
         "required": required,
+        "biomes": required_biomes,
         "results": matches[:limit],
     })
 

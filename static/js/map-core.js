@@ -164,7 +164,6 @@ function animateZoom() {
     state.viewZ = a.wz - (a.sy - state.height / 2) * state.zoom;
   }
   scheduleUrlUpdate();
-  primeVisibleBiomeTiles();
   requestRender();
 }
 
@@ -185,7 +184,6 @@ function startMomentum(vx, vz) {
     vx *= f;
     vz *= f;
     scheduleUrlUpdate();
-    primeVisibleBiomeTiles();
     requestRender();
     if (Math.hypot(vx, vz) > 0.01) {
       momentumRaf = requestAnimationFrame(step);

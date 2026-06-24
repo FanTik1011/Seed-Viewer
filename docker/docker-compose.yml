@@ -10,8 +10,7 @@ services:
       PORT: "8080"
       PUBLIC_BASE_PATH: "/minecraft-tools/Seed-Viewer"
       WEB_CONCURRENCY: "1"
-      BIOME_WORKERS: "6"
-      CLIENT_TILE_REQUESTS: "6"
+      GUNICORN_THREADS: "4"
       GUNICORN_TIMEOUT: "120"
     ports:
       - "8080:8080"

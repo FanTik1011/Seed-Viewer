@@ -5,9 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SeedMap</title>
 <link rel="stylesheet" href="{{ base_path }}/static/styles.css">
-<link rel="preload" href="{{ base_path }}/static/seed-worker.js" as="script">
-<link rel="preload" href="{{ base_path }}/static/js/map-render.js" as="script">
-<link rel="preload" href="{{ base_path }}/static/js/tile-stream.js" as="script">
 </head>
 <body>
 <div class="app">
@@ -45,7 +42,7 @@
 
   <main class="layout">
     <aside class="sidebar">
-      <button class="menu-toggle" id="menu-toggle" type="button" title="Collapse bottom menu" aria-expanded="true">
+      <button class="menu-toggle" id="menu-toggle" type="button" title="Collapse sidebar" aria-expanded="true">
         <span></span>
       </button>
       <section class="section features-panel">
@@ -57,7 +54,19 @@
             <span id="struct-total">0</span>
           </span>
         </div>
-        <div class="layer-list" id="struct-list"></div>
+        <div class="feature-scroll">
+          <div class="sub-title">Structures</div>
+          <div class="layer-list struct-list" id="struct-list"></div>
+
+          <div class="sub-title with-actions">
+            <span>Biomes</span>
+            <span>
+              <button class="mini-link" id="select-all-biomes" type="button">All</button>
+              <button class="mini-link" id="deselect-all-biomes" type="button">None</button>
+            </span>
+          </div>
+          <div class="layer-list biome-list" id="biome-list"></div>
+        </div>
       </section>
       <section class="section map-panel">
         <div class="section-title"><span>Map</span></div>
@@ -122,6 +131,31 @@
         <button class="icon-only" id="zoom-in" title="Zoom in"></button>
         <button class="icon-only" id="zoom-out" title="Zoom out"></button>
       </div>
+
+      <div class="floating finder-box finder-float" id="finder-panel">
+        <div class="finder-head">
+          <div>
+            <strong>Seed finder</strong>
+            <span>Find a new seed near spawn</span>
+          </div>
+          <button class="icon-only" id="close-finder" type="button" title="Hide seed finder"></button>
+        </div>
+        <div class="finder-grid">
+          <label class="finder-field wide">
+            <span>Wanted biome</span>
+            <select class="select" id="finder-biome-select" title="Target biome"></select>
+          </label>
+          <label class="finder-field wide">
+            <span>Wanted structure</span>
+            <select class="select" id="finder-structure-select" title="Optional target structure"></select>
+          </label>
+          <button class="btn primary" id="find-biome-btn" title="Find matching seeds"></button>
+        </div>
+        <div class="finder-status" id="finder-status">Pick what you want near spawn, then search.</div>
+        <div class="finder-results" id="finder-results"></div>
+      </div>
+
+      <button class="floating btn primary finder-open-btn" id="open-finder-btn" type="button"></button>
 
       <div class="floating chunk-pill" id="chunk-pill">
         <span class="dot-spin"></span>

@@ -74,7 +74,7 @@ function updateHud() {
 
 function updateChunkPill() {
   const n = state.pendingTiles.size + state.tileQueue.size;
-  const visible = false;
+  const visible = state.loaded && n > 0;
   const text = n === 1 ? "Loading 1 chunk" : `Loading ${n} chunks`;
   const key = `${visible}|${text}`;
   if (key === chunkPillCache) return;
@@ -177,8 +177,153 @@ function updatePopover() {
   els.popoverBiome.textContent = state.loaded ? biomeAt(point.x, point.z) : "-";
 }
 
+function biomeCatalog() {
+  return Object.keys(BIOME_NAMES)
+    .map(id => ({ id, label: biomeName(Number(id)), color: BIOME_COLORS[id] || "#5f6b6a" }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function buildBiomeSelect() {
+  if (!els.finderBiome) return;
+  if (els.finderBiome.dataset.version === state.version && els.finderBiome.options.length) return;
+  const current = els.finderBiome.value;
+  els.finderBiome.innerHTML = "";
+  for (const biome of biomeCatalog()) {
+    const option = document.createElement("option");
+    option.value = biome.id;
+    option.textContent = biome.label;
+    els.finderBiome.append(option);
+  }
+  if (current && [...els.finderBiome.options].some(option => option.value === current)) {
+    els.finderBiome.value = current;
+  }
+  els.finderBiome.dataset.version = state.version;
+}
+
+function buildFinderStructureSelect() {
+  if (!els.finderStructure) return;
+  const current = els.finderStructure.value;
+  els.finderStructure.innerHTML = "";
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = "Any / no structure";
+  els.finderStructure.append(none);
+  for (const feature of FEATURE_CATALOG) {
+    if (!feature.supported || feature.key === "spawn" || feature.key === "Stronghold") continue;
+    if (!isFeatureAvailable(feature.key)) continue;
+    const meta = STRUCT_META[feature.key];
+    if (!meta) continue;
+    const option = document.createElement("option");
+    option.value = feature.key;
+    option.textContent = meta.label;
+    els.finderStructure.append(option);
+  }
+  const preferred = current || "Village";
+  if ([...els.finderStructure.options].some(option => option.value === preferred)) {
+    els.finderStructure.value = preferred;
+  }
+}
+
+function updateFinderHint() {
+  if (!els.finderStatus || state.finderBusy) return;
+  if (state.finderResults.length) return;
+  const biome = biomeName(Number(els.finderBiome.value || 1));
+  const structure = els.finderStructure?.value ? els.finderStructure.selectedOptions[0].textContent : "no required structure";
+  els.finderStatus.textContent = `Will look for ${biome} and ${structure} near spawn.`;
+}
+
+async function searchMatchingSeeds() {
+  const biomeId = Number(els.finderBiome.value || 1);
+  const structure = els.finderStructure.value || "";
+  const biomeRadius = 1500;
+  const structureRadius = 1500;
+  const attempts = 100;
+  state.finderBusy = true;
+  els.finderBtn.disabled = true;
+  els.finderStatus.textContent = "Searching good seeds...";
+  els.finderResults.innerHTML = "";
+  try {
+    const data = await workerRequest("searchSeeds", {
+      version: els.version.value,
+      attempts,
+      biomeRadius,
+      structureRadius,
+      radius: Math.max(biomeRadius, structureRadius),
+      limit: 8,
+      required: structure,
+      biomes: String(biomeId)
+    });
+    state.finderResults = data.results || [];
+    renderSeedSearchResults(data);
+  } catch (err) {
+    console.error(err);
+    els.finderStatus.textContent = "Seed search failed.";
+    showToast("Seed search failed");
+  } finally {
+    state.finderBusy = false;
+    els.finderBtn.disabled = false;
+  }
+}
+
+function renderSeedSearchResults(data) {
+  const biomeId = String(data.biomes?.[0] ?? els.finderBiome.value);
+  const biomeLabel = biomeName(Number(biomeId));
+  const structure = data.required?.[0] || "";
+  const count = data.results?.length || 0;
+  els.finderStatus.textContent = count
+    ? `${count} good seed${count === 1 ? "" : "s"} found. Best result is first.`
+    : "No good seed found this time. Press Find seeds again.";
+  els.finderResults.innerHTML = "";
+  if (!count) return;
+  for (const item of data.results) {
+    const biomePoint = item.biomes?.[biomeId]?.[0];
+    const structPoint = structure ? item.structures?.[structure]?.[0] : null;
+    const structLabel = structure ? STRUCT_META[structure]?.label || structure : "No structure";
+    const card = document.createElement("div");
+    card.className = "seed-result-card";
+    card.innerHTML = `
+      <div class="seed-result-head">
+        <span class="seed-mono">${item.seed}</span>
+        <button class="mini-link load-seed" type="button">Load</button>
+      </div>
+      <div class="seed-result-meta">
+        <span>Spawn <b>${item.spawn.x}, ${item.spawn.z}</b></span>
+        <span>${biomeLabel} <b>${item.nearestBiomes?.[biomeId] ?? "-"}m</b>${biomePoint ? ` at ${biomePoint.x}, ${biomePoint.z}` : ""}</span>
+        <span>${structLabel} <b>${structure ? (item.nearest?.[structure] ?? "-") + "m" : "off"}</b>${structPoint ? ` at ${structPoint.x}, ${structPoint.z}` : ""}</span>
+      </div>
+    `;
+    card.querySelector(".load-seed").addEventListener("click", () => {
+      els.seedInput.value = item.seed;
+      loadWorld({
+        seed: item.seed,
+        version: els.version.value,
+        dimension: "overworld",
+        centerX: biomePoint?.x ?? item.spawn.x,
+        centerZ: biomePoint?.z ?? item.spawn.z,
+        zoom: Math.min(state.zoom || DEFAULT_ZOOM, DEFAULT_ZOOM)
+      });
+      showToast("Seed loaded");
+    });
+    els.finderResults.append(card);
+  }
+}
+
+function setAllBiomes(active) {
+  for (const id of Object.keys(state.biomeVis)) state.biomeVis[id] = active;
+  rebuildBiomeTileCanvases();
+  buildSidebar();
+}
+
+function toggleBiome(id) {
+  state.biomeVis[id] = !state.biomeVis[id];
+  rebuildBiomeTileCanvases();
+  buildSidebar();
+}
+
 function buildSidebar() {
   invalidateMarkers();
+  buildBiomeSelect();
+  buildFinderStructureSelect();
   els.layerList.innerHTML = "";
   els.layerList.append(
     makeLayerRow("layers", "Biomes", "#57d68d", null, state.showBiomes, () => {
@@ -206,6 +351,12 @@ function buildSidebar() {
     els.structList.append(makeLayerRow(meta.icon, meta.label, meta.color, available ? count : null, available ? state.vis[key] : false, () => toggleFeature(key, meta, available), { disabled: !available, asset: meta.asset }));
   }
   els.structTotal.textContent = total;
+
+  els.biomeList.innerHTML = "";
+  for (const biome of biomeCatalog()) {
+    els.biomeList.append(makeBiomeRow(biome));
+  }
+  updateFinderHint();
 }
 
 async function toggleFeature(key, meta, available) {
@@ -261,5 +412,21 @@ function makeLayerRow(iconName, label, color, count, active, onClick, options = 
     <span class="switch ${active ? "on" : ""}"></span>
   `;
   row.addEventListener("click", onClick);
+  return row;
+}
+
+function makeBiomeRow(biome) {
+  const row = document.createElement("button");
+  const active = state.biomeVis[biome.id] !== false;
+  row.className = `layer-row biome-row ${active ? "" : "is-off"}`;
+  row.type = "button";
+  row.title = biome.label;
+  row.style.setProperty("--icon", biome.color);
+  row.innerHTML = `
+    <span class="biome-swatch" style="background:${biome.color}"></span>
+    <span class="layer-label">${biome.label}</span>
+    <span class="switch ${active ? "on" : ""}"></span>
+  `;
+  row.addEventListener("click", () => toggleBiome(biome.id));
   return row;
 }

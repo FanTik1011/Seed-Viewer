@@ -3,10 +3,9 @@ FROM python:3.13-slim
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PORT=8080
-ENV PUBLIC_BASE_PATH=
+ENV PUBLIC_BASE_PATH=/minecraft-tools/Seed-Viewer
 ENV WEB_CONCURRENCY=1
-ENV BIOME_WORKERS=6
-ENV CLIENT_TILE_REQUESTS=6
+ENV GUNICORN_THREADS=4
 ENV GUNICORN_TIMEOUT=120
 
 WORKDIR /app
@@ -18,7 +17,7 @@ RUN apt-get update \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app.py gunicorn.conf.py cubiomes_wrapper.c libseedmap.so ./
+COPY app.py cubiomes_wrapper.c libseedmap.so ./
 COPY templates ./templates
 COPY static ./static
 
@@ -31,4 +30,4 @@ EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD python -c "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:%s%s/api/versions' % (os.environ.get('PORT', '8080'), os.environ.get('PUBLIC_BASE_PATH', '')), timeout=3).read()"
 
-CMD ["gunicorn", "-c", "gunicorn.conf.py", "app:app"]
+CMD ["sh", "-c", "gunicorn app:app --bind 0.0.0.0:${PORT} --workers ${WEB_CONCURRENCY} --threads ${GUNICORN_THREADS} --timeout ${GUNICORN_TIMEOUT}"]
