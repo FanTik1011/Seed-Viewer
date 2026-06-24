@@ -60,6 +60,7 @@ const state = {
   tiles: new Map(),
   tileQueue: new Map(),
   pendingTiles: new Map(),
+  tileLatencyMs: 0,
   structures: {},
   structFetched: new Set(),
   structSeen: {},
@@ -92,6 +93,7 @@ let autoLoadTimer = 0;
 let tileBuildPending = false;
 let tilePumpPending = false;
 const tileBuildQueue = [];
+let tileQueueSeq = 0;
 const markerImageCache = new Map();
 const labelWidthCache = new Map();
 let markerCache = null;

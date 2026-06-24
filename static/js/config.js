@@ -5,21 +5,21 @@ const WORKER_URL = `${BASE_PATH}/static/seed-worker.js`;
 const CPU_CORES = Math.max(2, navigator.hardwareConcurrency || 4);
 const SAMPLE_SCALE = 8;
 const TILE_SAMPLES = TILE_BLOCKS / SAMPLE_SCALE;
-const MAX_TILE_CACHE = 900;
-const MAX_TILE_QUEUE = 220;
-const MAX_TILE_REQUESTS = Math.max(3, Math.min(8, CPU_CORES - 1));
+const MAX_TILE_CACHE = 1600;
+const MAX_TILE_QUEUE = 320;
+const MAX_TILE_REQUESTS = Math.max(4, Math.min(10, CPU_CORES));
 const MAX_DRAW_TILES = 240;
 const TILE_REQUEST_TIMEOUT = 15000;
 
 const STRUCT_REQUEST_TIMEOUT = 15000;
 const MAX_TILE_ATTEMPTS = 3;
 const TILE_RETRY_PENALTY = 4000;
-const PREFETCH_MARGIN = 0;
-const MAX_TILE_ENQUEUE_PER_RENDER = 24;
-const MAX_TILE_QUEUE_WHILE_LOADING = 80;
+const PREFETCH_MARGIN = 1;
+const MAX_TILE_ENQUEUE_PER_RENDER = 48;
+const MAX_TILE_QUEUE_WHILE_LOADING = 150;
 const TILE_VIEW_MARGIN = 0;
-const TILE_QUEUE_VIEW_MARGIN = 0;
-const TILE_RESULT_KEEP_MARGIN = 0;
+const TILE_QUEUE_VIEW_MARGIN = 1;
+const TILE_RESULT_KEEP_MARGIN = 1;
 
 const MARKER_LITE_LIMIT = 200;
 const MARKER_LABEL_LIMIT = 50;
@@ -46,12 +46,14 @@ const STRUCT_FAST_TYPES = [
   "Desert_Temple", "Jungle_Temple", "Witch_Hut", "Igloo"
 ];
 
-const WORKER_POOL_SIZE = Math.max(2, Math.min(6, CPU_CORES - 1));
+const WORKER_POOL_SIZE = Math.max(2, Math.min(8, CPU_CORES));
 const VISIBLE_TILE_PRIORITY_BOOST = 1_000_000;
-const COARSE_TILE_PRIORITY_BOOST = 500_000;
-const TILE_BUILD_BATCH = 10;
-const TILE_BUILD_FRAME_BUDGET = 6;
+const COARSE_TILE_PRIORITY_BOOST = 650_000;
+const TILE_BUILD_BATCH = 18;
+const TILE_BUILD_FRAME_BUDGET = 8;
 const TILE_PENDING_VIEW_MARGIN = 2;
+const RAPID_PAN_CANCEL_MARGIN = 0;
+const MOVING_TILE_LOOKAHEAD_MS = 140;
 
 const MODERN_LODS = [
   { blocks: 256,   samples: 32,  scale: 8  },
@@ -84,7 +86,12 @@ function performanceHints() {
 function tileRequestLimit() {
   const hinted = Number(performanceHints().tileRequests);
   const serverLimit = Number.isFinite(hinted) && hinted > 0 ? hinted : MAX_TILE_REQUESTS;
-  return Math.max(1, Math.min(MAX_TILE_REQUESTS, Math.floor(serverLimit)));
+  let limit = Math.max(1, Math.min(MAX_TILE_REQUESTS, Math.floor(serverLimit)));
+  const latency = Number(state.tileLatencyMs || 0);
+  if (latency > 2600) limit = Math.min(limit, 2);
+  else if (latency > 1400) limit = Math.min(limit, 4);
+  if (navigator.connection?.saveData) limit = Math.min(limit, 3);
+  return limit;
 }
 
 function workerPoolTarget() {

@@ -10,7 +10,7 @@ function queueTile(lod, tx, tz, visible = false) {
     return false;
   }
   const priority = tilePriority(lod, tx, tz, visible);
-  state.tileQueue.set(key, { lod, tx, tz, priority, visible, runId: state.runId, attempts: 0 });
+  state.tileQueue.set(key, { lod, tx, tz, priority, visible, runId: state.runId, attempts: 0, seq: ++tileQueueSeq });
   if (state.tileQueue.size > MAX_TILE_QUEUE) pruneTileQueue();
   scheduleTilePump();
   return true;
@@ -20,10 +20,27 @@ function tilePriority(lod, tx, tz, visible = false, attempts = 0) {
   const b = LODS[lod].blocks;
   const cx = tx * b + b / 2;
   const cz = tz * b + b / 2;
-  let priority = Math.hypot(cx - state.viewX, cz - state.viewZ) + attempts * TILE_RETRY_PENALTY;
+  const view = predictedTileView();
+  let priority = Math.hypot(cx - view.x, cz - view.z) + attempts * TILE_RETRY_PENALTY;
   if (visible) priority -= VISIBLE_TILE_PRIORITY_BOOST;
   if (lod > 0) priority -= COARSE_TILE_PRIORITY_BOOST / lod;
   return priority;
+}
+
+function predictedTileView() {
+  if (!((dragStart && pointerMoved) || momentumRaf)) return { x: state.viewX, z: state.viewZ };
+  return {
+    x: state.viewX + panVel.x * MOVING_TILE_LOOKAHEAD_MS,
+    z: state.viewZ + panVel.z * MOVING_TILE_LOOKAHEAD_MS
+  };
+}
+
+function rapidPanActive() {
+  return !!((dragStart && pointerMoved) || momentumRaf) && Math.hypot(panVel.x, panVel.z) * 1000 > 1400;
+}
+
+function tileKeepMargin(baseMargin) {
+  return rapidPanActive() ? RAPID_PAN_CANCEL_MARGIN : baseMargin;
 }
 
 function refreshTilePriorities() {
@@ -53,7 +70,7 @@ function pumpTiles() {
   const requestLimit = tileRequestLimit();
   if (state.pendingTiles.size >= requestLimit || !state.tileQueue.size) return;
   refreshTilePriorities();
-  const sorted = [...state.tileQueue.values()].sort((a, b) => a.priority - b.priority);
+  const sorted = [...state.tileQueue.values()].sort((a, b) => a.priority - b.priority || a.seq - b.seq);
   let i = 0;
   while (state.pendingTiles.size < requestLimit && i < sorted.length) {
     const next = sorted[i++];
@@ -65,15 +82,16 @@ function pumpTiles() {
 function pruneTileQueue() {
   refreshTilePriorities();
   const keep = [...state.tileQueue.entries()]
-    .sort((a, b) => a[1].priority - b[1].priority)
+    .sort((a, b) => a[1].priority - b[1].priority || a[1].seq - b[1].seq)
     .slice(0, MAX_TILE_QUEUE);
   state.tileQueue = new Map(keep);
 }
 
 function trimTileQueueToView(range) {
   if (!state.tileQueue.size) return;
+  const margin = tileKeepMargin(TILE_QUEUE_VIEW_MARGIN);
   for (const [key, job] of state.tileQueue) {
-    if (!tileJobRelevant(job, TILE_QUEUE_VIEW_MARGIN) || job.runId !== state.runId) {
+    if (!tileJobRelevant(job, margin) || job.runId !== state.runId) {
       state.tileQueue.delete(key);
     }
   }
@@ -95,8 +113,9 @@ function tileJobInRange(job, range, margin = 0) {
 
 function cancelStaleTileRequests() {
   if (!state.pendingTiles.size) return;
+  const margin = tileKeepMargin(TILE_PENDING_VIEW_MARGIN);
   for (const [key, pending] of state.pendingTiles) {
-    if (pending.runId !== state.runId || !tileJobRelevant(pending, TILE_PENDING_VIEW_MARGIN)) {
+    if (pending.runId !== state.runId || !tileJobRelevant(pending, margin)) {
       pending.request?.cancel?.();
       state.pendingTiles.delete(key);
     }
@@ -136,12 +155,19 @@ function withTimeout(promise, ms, message = "Request timed out") {
   });
 }
 
+function recordTileLatency(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return;
+  state.tileLatencyMs = state.tileLatencyMs
+    ? state.tileLatencyMs * 0.82 + ms * 0.18
+    : ms;
+}
+
 function requeueTile(job) {
   const key = tileKey(job.lod, job.tx, job.tz);
   if (state.tiles.has(key) || state.pendingTiles.has(key) || state.tileQueue.has(key)) return;
   const attempts = (job.attempts || 0) + 1;
   const priority = tilePriority(job.lod, job.tx, job.tz, job.visible, attempts);
-  state.tileQueue.set(key, { lod: job.lod, tx: job.tx, tz: job.tz, priority, visible: job.visible, runId: job.runId, attempts });
+  state.tileQueue.set(key, { lod: job.lod, tx: job.tx, tz: job.tz, priority, visible: job.visible, runId: job.runId, attempts, seq: ++tileQueueSeq });
   if (state.tileQueue.size > MAX_TILE_QUEUE) pruneTileQueue();
 }
 
@@ -154,6 +180,7 @@ async function loadTile(job) {
   let queued = false;
   let retry = false;
   let request = null;
+  const started = performance.now();
   try {
     request = workerRequest("biomeTile", {
         seed: state.seed,
@@ -172,6 +199,7 @@ async function loadTile(job) {
       TILE_REQUEST_TIMEOUT,
       "Tile request timed out"
     );
+    recordTileLatency(performance.now() - started);
     if (job.runId !== state.runId || !data.grid) return;
     if (!tileJobRelevant(job, TILE_RESULT_KEEP_MARGIN)) return;
     tileBuildQueue.push({ key, grid: data.grid, bitmap: data.bitmap, lod: job.lod, tx: job.tx, tz: job.tz, runId: job.runId });
