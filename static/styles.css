@@ -3126,3 +3126,334 @@
   body:not(.sidebar-hidden) .layout::before {
     animation-name: none !important;
   }
+
+  .finder-float {
+    width: 430px !important;
+    max-width: min(430px, calc(100vw - 410px)) !important;
+  }
+
+  .finder-float .finder-grid {
+    grid-template-columns: minmax(96px, .34fr) minmax(104px, .36fr) minmax(0, 1fr) !important;
+    align-items: end !important;
+  }
+
+  .finder-float .finder-grid .btn {
+    grid-column: auto !important;
+  }
+
+  .finder-radius-presets {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .finder-radius-presets .mini-link {
+    width: 100%;
+    height: 24px;
+    padding: 0 4px;
+    font-family: "Cascadia Mono", Consolas, monospace;
+  }
+
+  .finder-radius-presets .mini-link.is-active {
+    color: #07100d;
+    background: #8cff63;
+    border-color: rgba(190,255,160,.55);
+    box-shadow: 0 8px 18px rgba(140,255,99,.16);
+  }
+
+  .finder-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-height: 30px;
+    padding: 7px;
+    border-radius: 9px;
+    background: rgba(13, 13, 23, .72);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.07);
+  }
+
+  .finder-summary.is-empty {
+    align-items: center;
+    color: #8f8da8;
+    font-size: 11px;
+    font-weight: 800;
+  }
+
+  .finder-summary-chip {
+    min-width: 0;
+    max-width: 100%;
+    min-height: 24px;
+    display: inline-grid;
+    grid-template-columns: 9px minmax(0, 1fr);
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px;
+    border: 1px solid color-mix(in srgb, var(--chip), transparent 45%);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--chip), transparent 82%);
+    color: white;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 850;
+  }
+
+  .finder-summary-chip span {
+    width: 9px;
+    height: 9px;
+    border-radius: 3px;
+    background: var(--chip);
+    box-shadow: 0 0 10px color-mix(in srgb, var(--chip), transparent 35%);
+  }
+
+  .finder-summary-chip b {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: inherit;
+  }
+
+  .finder-summary-chip:hover {
+    filter: brightness(1.12);
+    transform: translateY(-1px);
+  }
+
+  .finder-picks {
+    display: grid;
+    gap: 7px;
+    min-width: 0;
+  }
+
+  .finder-pick-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    color: #b9b8ce;
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+  }
+
+  .finder-filter {
+    width: 100%;
+    height: 30px;
+    min-width: 0;
+    padding: 0 9px;
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 8px;
+    outline: 0;
+    background: rgba(14, 14, 24, .86);
+    color: #f4f2ff;
+    font: 11px Inter, system-ui, sans-serif;
+  }
+
+  .finder-filter:focus {
+    border-color: rgba(140,255,99,.55);
+    box-shadow: 0 0 0 3px rgba(140,255,99,.10);
+  }
+
+  .finder-filter::placeholder {
+    color: #8f8da8;
+  }
+
+  .finder-chip-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    max-height: 94px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 2px 2px 3px;
+  }
+
+  .finder-empty {
+    width: 100%;
+    padding: 7px 8px;
+    color: #8f8da8;
+    font-size: 11px;
+    font-weight: 800;
+    border-radius: 8px;
+    background: rgba(14,14,24,.72);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.05);
+  }
+
+  .finder-chip-wrap {
+    display: inline-grid;
+    grid-template-columns: minmax(0, 1fr) 24px;
+    gap: 3px;
+    max-width: 100%;
+  }
+
+  .finder-chip-wrap .finder-chip {
+    border-radius: 8px 4px 4px 8px;
+  }
+
+  .finder-structure-list {
+    max-height: 78px;
+  }
+
+  .finder-chip {
+    min-width: 0;
+    max-width: 100%;
+    min-height: 27px;
+    display: inline-grid;
+    grid-template-columns: 17px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px 4px 5px;
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 8px;
+    background: rgba(20, 20, 33, .92);
+    color: #d9d8ea;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 800;
+    text-align: left;
+    transition: transform .16s var(--premium-ease), background .16s, border-color .16s, box-shadow .16s;
+  }
+
+  .finder-chip-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .finder-chip-count {
+    min-width: 22px;
+    padding: 1px 5px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--chip), transparent 58%);
+    color: #ffffff;
+    font: 800 10px "Cascadia Mono", Consolas, monospace;
+    text-align: center;
+  }
+
+  .finder-chip-minus {
+    width: 24px;
+    min-height: 27px;
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 4px 8px 8px 4px;
+    background: rgba(20, 20, 33, .92);
+    color: #d9d8ea;
+    cursor: pointer;
+    font: 900 14px/1 "Cascadia Mono", Consolas, monospace;
+    transition: transform .16s var(--premium-ease), background .16s, border-color .16s;
+  }
+
+  .finder-chip-minus:hover {
+    transform: translateY(-1px);
+    background: color-mix(in srgb, var(--chip), transparent 72%);
+    border-color: color-mix(in srgb, var(--chip), transparent 42%);
+    color: white;
+  }
+
+  .finder-chip:hover {
+    transform: translateY(-1px);
+    background: rgba(43, 42, 68, .98);
+    border-color: color-mix(in srgb, var(--chip), transparent 48%);
+  }
+
+  .finder-chip.is-selected {
+    color: white;
+    background:
+      linear-gradient(90deg, color-mix(in srgb, var(--chip), transparent 58%), rgba(35, 34, 57, .98) 70%);
+    border-color: color-mix(in srgb, var(--chip), transparent 32%);
+    box-shadow:
+      inset 3px 0 var(--chip),
+      0 8px 18px color-mix(in srgb, var(--chip), transparent 84%);
+  }
+
+  .finder-chip-dot,
+  .finder-chip-icon {
+    width: 17px;
+    height: 17px;
+    border-radius: 5px;
+    display: grid;
+    place-items: center;
+    color: var(--chip);
+    background: color-mix(in srgb, var(--chip), transparent 78%);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.18);
+  }
+
+  .finder-chip-dot::before {
+    content: "";
+    width: 10px;
+    height: 10px;
+    border-radius: 4px;
+    background: var(--chip);
+  }
+
+  .finder-chip-icon svg {
+    width: 12px;
+    height: 12px;
+  }
+
+  .finder-chip-icon img {
+    width: 17px;
+    height: 17px;
+    display: block;
+    border-radius: 5px;
+    object-fit: contain;
+  }
+
+  .finder-float .finder-results {
+    max-height: 180px !important;
+  }
+
+  @media (max-width: 1100px) {
+    .finder-float {
+      width: 360px !important;
+      max-width: calc(100vw - 350px) !important;
+    }
+  }
+
+  @media (max-width: 760px) {
+    .finder-float {
+      max-width: none !important;
+    }
+    .finder-float .finder-grid {
+      grid-template-columns: 1fr !important;
+    }
+    .finder-radius-presets {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .finder-chip-list {
+      max-height: 80px;
+    }
+  }
+
+  .features-panel .biome-row.is-highlighted {
+    color: #ffffff !important;
+    background:
+      linear-gradient(90deg, color-mix(in srgb, var(--icon), transparent 52%), rgba(35, 34, 58, .98) 64%) !important;
+    box-shadow:
+      inset 3px 0 var(--icon),
+      0 0 0 1px color-mix(in srgb, var(--icon), transparent 35%),
+      0 8px 20px color-mix(in srgb, var(--icon), transparent 82%) !important;
+    opacity: 1 !important;
+    filter: none !important;
+  }
+
+  .features-panel .biome-row.is-highlighted .biome-swatch {
+    filter: none !important;
+    box-shadow:
+      inset 0 0 0 1px rgba(255,255,255,.5),
+      0 0 0 3px color-mix(in srgb, var(--icon), transparent 72%),
+      0 0 16px color-mix(in srgb, var(--icon), transparent 30%) !important;
+  }
+
+  .features-panel .biome-row.is-highlighted .layer-label {
+    text-shadow: 0 1px 8px rgba(0,0,0,.42);
+  }
+
+  .features-panel .biome-row.is-highlighted::before {
+    content: "";
+    position: absolute;
+    inset: 3px;
+    border-radius: inherit;
+    border: 1px solid rgba(255,255,255,.13);
+    pointer-events: none;
+  }

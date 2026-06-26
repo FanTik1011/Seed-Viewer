@@ -93,7 +93,8 @@ function biomeAt(wx, wz) {
     if (!tile) continue;
     const localX = Math.floor((wx - tx * cfg.blocks) / cfg.scale);
     const localZ = Math.floor((wz - tz * cfg.blocks) / cfg.scale);
-    const id = tile.grid[localZ * cfg.samples + localX];
+    const grid = tile.displayGrid || tile.grid;
+    const id = grid[localZ * cfg.samples + localX];
     return biomeName(id);
   }
   return "Biome loading";
@@ -183,64 +184,197 @@ function biomeCatalog() {
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 
-function buildBiomeSelect() {
-  if (!els.finderBiome) return;
-  if (els.finderBiome.dataset.version === state.version && els.finderBiome.options.length) return;
-  const current = els.finderBiome.value;
-  els.finderBiome.innerHTML = "";
-  for (const biome of biomeCatalog()) {
-    const option = document.createElement("option");
-    option.value = biome.id;
-    option.textContent = biome.label;
-    els.finderBiome.append(option);
+function buildFinderBiomePicker() {
+  if (!els.finderBiomeList) return;
+  const known = new Set(Object.keys(BIOME_NAMES));
+  state.finderBiomes = new Set([...state.finderBiomes].filter(id => known.has(String(id))));
+  const filter = finderFilterText(els.finderBiomeFilter);
+  const biomes = biomeCatalog()
+    .filter(biome => !filter || biome.label.toLowerCase().includes(filter))
+    .sort((a, b) => Number(state.finderBiomes.has(b.id)) - Number(state.finderBiomes.has(a.id)) || a.label.localeCompare(b.label));
+  els.finderBiomeList.innerHTML = "";
+  for (const biome of biomes) {
+    els.finderBiomeList.append(makeFinderChip({
+      value: biome.id,
+      label: biome.label,
+      color: biome.color,
+      selected: state.finderBiomes.has(biome.id),
+      onClick: () => toggleFinderBiome(biome.id)
+    }));
   }
-  if (current && [...els.finderBiome.options].some(option => option.value === current)) {
-    els.finderBiome.value = current;
-  }
-  els.finderBiome.dataset.version = state.version;
+  if (!biomes.length) els.finderBiomeList.append(makeFinderEmpty("No matching biomes"));
+  updateFinderSummary();
 }
 
-function buildFinderStructureSelect() {
-  if (!els.finderStructure) return;
-  const current = els.finderStructure.value;
-  els.finderStructure.innerHTML = "";
-  const none = document.createElement("option");
-  none.value = "";
-  none.textContent = "Any / no structure";
-  els.finderStructure.append(none);
-  for (const feature of FEATURE_CATALOG) {
-    if (!feature.supported || feature.key === "spawn" || feature.key === "Stronghold") continue;
-    if (!isFeatureAvailable(feature.key)) continue;
-    const meta = STRUCT_META[feature.key];
-    if (!meta) continue;
-    const option = document.createElement("option");
-    option.value = feature.key;
-    option.textContent = meta.label;
-    els.finderStructure.append(option);
+function buildFinderStructurePicker() {
+  if (!els.finderStructureList) return;
+  const filter = finderFilterText(els.finderStructureFilter);
+  const options = finderStructureOptions()
+    .filter(item => !filter || item.meta.label.toLowerCase().includes(filter))
+    .sort((a, b) => Number(state.finderStructures.has(b.key)) - Number(state.finderStructures.has(a.key)) || a.meta.label.localeCompare(b.meta.label));
+  const available = new Set(options.map(item => item.key));
+  const allAvailable = new Set(finderStructureOptions().map(item => item.key));
+  state.finderStructures = new Map([...state.finderStructures].filter(([key, count]) => allAvailable.has(key) && count > 0));
+  els.finderStructureList.innerHTML = "";
+  for (const item of options) {
+    const count = state.finderStructures.get(item.key) || 0;
+    els.finderStructureList.append(makeFinderChip({
+      value: item.key,
+      label: item.meta.label,
+      color: item.meta.color,
+      icon: item.meta.icon,
+      asset: item.meta.asset,
+      selected: count > 0,
+      count,
+      onClick: () => addFinderStructure(item.key),
+      onRemove: () => removeFinderStructure(item.key)
+    }));
   }
-  const preferred = current || "Village";
-  if ([...els.finderStructure.options].some(option => option.value === preferred)) {
-    els.finderStructure.value = preferred;
+  if (!options.length) els.finderStructureList.append(makeFinderEmpty("No matching structures"));
+  updateFinderSummary();
+}
+
+function finderStructureOptions() {
+  return FEATURE_CATALOG
+    .filter(feature => feature.supported && feature.key !== "spawn" && feature.key !== "Stronghold")
+    .filter(feature => isFeatureAvailable(feature.key))
+    .map(feature => ({ key: feature.key, meta: STRUCT_META[feature.key] }))
+    .filter(item => item.meta);
+}
+
+function makeFinderChip({ value, label, color, icon, asset, selected, count = 0, onClick, onRemove }) {
+  const chipLabel = count > 1 ? `${label} x${count}` : label;
+  const chip = document.createElement("button");
+  chip.className = `finder-chip ${selected ? "is-selected" : ""}`;
+  chip.type = "button";
+  chip.title = selected ? `Add another ${label}` : `Add ${label}`;
+  chip.setAttribute("aria-pressed", selected ? "true" : "false");
+  chip.style.setProperty("--chip", color || "#8cff63");
+  chip.innerHTML = `
+    <span class="${asset || icon ? "finder-chip-icon" : "finder-chip-dot"}">${asset || icon ? iconMarkup(icon || "target", asset) : ""}</span>
+    <span class="finder-chip-label">${chipLabel}</span>
+    ${count > 1 ? `<span class="finder-chip-count">x${count}</span>` : ""}
+  `;
+  chip.addEventListener("click", onClick);
+  if (!onRemove || !selected) return chip;
+
+  const wrap = document.createElement("span");
+  wrap.className = "finder-chip-wrap";
+  wrap.style.setProperty("--chip", color || "#8cff63");
+  const remove = document.createElement("button");
+  remove.className = "finder-chip-minus";
+  remove.type = "button";
+  remove.title = `Remove one ${label}`;
+  remove.textContent = "-";
+  remove.addEventListener("click", event => {
+    event.stopPropagation();
+    onRemove();
+  });
+  wrap.append(chip, remove);
+  return wrap;
+}
+
+function makeFinderEmpty(text) {
+  const item = document.createElement("div");
+  item.className = "finder-empty";
+  item.textContent = text;
+  return item;
+}
+
+function finderFilterText(input) {
+  return String(input?.value || "").trim().toLowerCase();
+}
+
+function clearFinderResults() {
+  state.finderResults = [];
+  if (els.finderResults) els.finderResults.innerHTML = "";
+}
+
+function toggleFinderBiome(id) {
+  if (state.finderBiomes.has(id)) state.finderBiomes.delete(id);
+  else state.finderBiomes.add(id);
+  clearFinderResults();
+  buildFinderBiomePicker();
+  updateFinderHint();
+}
+
+function addFinderStructure(key) {
+  const next = Math.min((state.finderStructures.get(key) || 0) + 1, 8);
+  state.finderStructures.set(key, next);
+  clearFinderResults();
+  buildFinderStructurePicker();
+  updateFinderHint();
+}
+
+function removeFinderStructure(key) {
+  const next = (state.finderStructures.get(key) || 0) - 1;
+  if (next > 0) state.finderStructures.set(key, next);
+  else state.finderStructures.delete(key);
+  clearFinderResults();
+  buildFinderStructurePicker();
+  updateFinderHint();
+}
+
+function finderRadius() {
+  const value = Number(els.finderRadius?.value || 1500);
+  return clamp(Number.isFinite(value) ? Math.round(value) : 1500, 256, 6000);
+}
+
+function finderAttempts() {
+  const value = Number(els.finderAttempts?.value || 100);
+  return clamp(Number.isFinite(value) ? Math.round(value) : 100, 1, 250);
+}
+
+function setFinderRadius(value) {
+  if (!els.finderRadius) return;
+  els.finderRadius.value = finderRadiusValue(value);
+  clearFinderResults();
+  updateFinderHint();
+}
+
+function finderRadiusValue(value) {
+  return clamp(Number.isFinite(Number(value)) ? Math.round(Number(value)) : 1500, 256, 6000);
+}
+
+function updateFinderRadiusPresetState() {
+  if (!els.finderRadiusPresets) return;
+  const radius = finderRadius();
+  for (const btn of els.finderRadiusPresets.querySelectorAll("[data-radius]")) {
+    btn.classList.toggle("is-active", Number(btn.dataset.radius) === radius);
   }
 }
 
 function updateFinderHint() {
   if (!els.finderStatus || state.finderBusy) return;
   if (state.finderResults.length) return;
-  const biome = biomeName(Number(els.finderBiome.value || 1));
-  const structure = els.finderStructure?.value ? els.finderStructure.selectedOptions[0].textContent : "no required structure";
-  els.finderStatus.textContent = `Will look for ${biome} and ${structure} near spawn.`;
+  const biomeCount = state.finderBiomes.size;
+  const structureCount = finderStructureTotal();
+  const parts = [];
+  if (biomeCount) parts.push(`${biomeCount} biome${biomeCount === 1 ? "" : "s"}`);
+  if (structureCount) parts.push(`${structureCount} structure${structureCount === 1 ? "" : "s"}`);
+  els.finderStatus.textContent = parts.length
+    ? `Looking for ${parts.join(" + ")} within ${finderRadius()} blocks. ${finderAttempts()} seeds per run.`
+    : "Pick at least one biome or structure.";
+  updateFinderSummary();
+  updateFinderRadiusPresetState();
 }
 
 async function searchMatchingSeeds() {
-  const biomeId = Number(els.finderBiome.value || 1);
-  const structure = els.finderStructure.value || "";
-  const biomeRadius = 1500;
-  const structureRadius = 1500;
-  const attempts = 100;
+  const biomeIds = [...state.finderBiomes];
+  const structures = finderStructureRequestList();
+  if (!biomeIds.length && !structures.length) {
+    showToast("Pick at least one target");
+    updateFinderHint();
+    return;
+  }
+  const radius = finderRadius();
+  if (els.finderRadius) els.finderRadius.value = radius;
+  const biomeRadius = radius;
+  const structureRadius = radius;
+  const attempts = finderAttempts();
   state.finderBusy = true;
   els.finderBtn.disabled = true;
-  els.finderStatus.textContent = "Searching good seeds...";
+  els.finderStatus.textContent = `Searching ${attempts} seeds within ${radius} blocks...`;
   els.finderResults.innerHTML = "";
   try {
     const data = await workerRequest("searchSeeds", {
@@ -250,8 +384,8 @@ async function searchMatchingSeeds() {
       structureRadius,
       radius: Math.max(biomeRadius, structureRadius),
       limit: 8,
-      required: structure,
-      biomes: String(biomeId)
+      required: structures.join(","),
+      biomes: biomeIds.join(",")
     });
     state.finderResults = data.results || [];
     renderSeedSearchResults(data);
@@ -266,19 +400,28 @@ async function searchMatchingSeeds() {
 }
 
 function renderSeedSearchResults(data) {
-  const biomeId = String(data.biomes?.[0] ?? els.finderBiome.value);
-  const biomeLabel = biomeName(Number(biomeId));
-  const structure = data.required?.[0] || "";
+  const biomeIds = (data.biomes || []).map(String);
+  const structures = structureCountsFromList(data.required || []);
+  const structureEntries = [...structures.entries()];
   const count = data.results?.length || 0;
   els.finderStatus.textContent = count
-    ? `${count} good seed${count === 1 ? "" : "s"} found. Best result is first.`
+    ? `${count} good seed${count === 1 ? "" : "s"} found. Best match is first.`
     : "No good seed found this time. Press Find seeds again.";
   els.finderResults.innerHTML = "";
   if (!count) return;
   for (const item of data.results) {
-    const biomePoint = item.biomes?.[biomeId]?.[0];
-    const structPoint = structure ? item.structures?.[structure]?.[0] : null;
-    const structLabel = structure ? STRUCT_META[structure]?.label || structure : "No structure";
+    const biomeLines = biomeIds.map(id => {
+      const point = item.biomes?.[id]?.[0];
+      return finderResultLine(biomeName(Number(id)), item.nearestBiomes?.[id], point);
+    }).join("");
+    const structureLines = structureEntries.map(([key, needed]) => {
+      const points = item.structures?.[key] || [];
+      const label = needed > 1 ? `${STRUCT_META[key]?.label || key} x${needed}` : STRUCT_META[key]?.label || key;
+      return finderResultLine(label, item.nearest?.[key], points[0], points.length);
+    }).join("");
+    const firstBiomePoint = biomeIds.map(id => item.biomes?.[id]?.[0]).find(Boolean);
+    const firstStructPoint = structureEntries.map(([key]) => item.structures?.[key]?.[0]).find(Boolean);
+    const center = firstBiomePoint || firstStructPoint || item.spawn;
     const card = document.createElement("div");
     card.className = "seed-result-card";
     card.innerHTML = `
@@ -288,8 +431,8 @@ function renderSeedSearchResults(data) {
       </div>
       <div class="seed-result-meta">
         <span>Spawn <b>${item.spawn.x}, ${item.spawn.z}</b></span>
-        <span>${biomeLabel} <b>${item.nearestBiomes?.[biomeId] ?? "-"}m</b>${biomePoint ? ` at ${biomePoint.x}, ${biomePoint.z}` : ""}</span>
-        <span>${structLabel} <b>${structure ? (item.nearest?.[structure] ?? "-") + "m" : "off"}</b>${structPoint ? ` at ${structPoint.x}, ${structPoint.z}` : ""}</span>
+        ${biomeLines}
+        ${structureLines}
       </div>
     `;
     card.querySelector(".load-seed").addEventListener("click", () => {
@@ -298,8 +441,8 @@ function renderSeedSearchResults(data) {
         seed: item.seed,
         version: els.version.value,
         dimension: "overworld",
-        centerX: biomePoint?.x ?? item.spawn.x,
-        centerZ: biomePoint?.z ?? item.spawn.z,
+        centerX: center.x,
+        centerZ: center.z,
         zoom: Math.min(state.zoom || DEFAULT_ZOOM, DEFAULT_ZOOM)
       });
       showToast("Seed loaded");
@@ -308,22 +451,95 @@ function renderSeedSearchResults(data) {
   }
 }
 
+function finderResultLine(label, distance, point, foundCount = 0) {
+  const dist = distance == null ? "-" : `${distance}m`;
+  const count = foundCount > 1 ? ` (${foundCount} found)` : "";
+  const coords = point ? ` at ${point.x}, ${point.z}` : "";
+  return `<span>${label} <b>${dist}</b>${count}${coords}</span>`;
+}
+
+function finderStructureTotal() {
+  return [...state.finderStructures.values()].reduce((sum, count) => sum + count, 0);
+}
+
+function updateFinderSummary() {
+  if (!els.finderSummary) return;
+  const chips = [];
+  for (const id of state.finderBiomes) {
+    const color = BIOME_COLORS[id] || "#8cff63";
+    chips.push({ type: "biome", key: id, label: biomeName(Number(id)), color });
+  }
+  for (const [key, count] of state.finderStructures) {
+    const meta = STRUCT_META[key];
+    if (!meta) continue;
+    chips.push({ type: "structure", key, label: count > 1 ? `${meta.label} x${count}` : meta.label, color: meta.color });
+  }
+  els.finderSummary.innerHTML = "";
+  els.finderSummary.classList.toggle("is-empty", chips.length === 0);
+  if (!chips.length) {
+    els.finderSummary.textContent = "No targets selected";
+    return;
+  }
+  for (const item of chips) {
+    const chip = document.createElement("button");
+    chip.className = "finder-summary-chip";
+    chip.type = "button";
+    chip.style.setProperty("--chip", item.color);
+    chip.title = `Remove ${item.label}`;
+    chip.innerHTML = `<span></span><b>${item.label}</b>`;
+    chip.addEventListener("click", () => {
+      if (item.type === "biome") state.finderBiomes.delete(item.key);
+      else state.finderStructures.delete(item.key);
+      clearFinderResults();
+      buildFinderBiomePicker();
+      buildFinderStructurePicker();
+      updateFinderHint();
+    });
+    els.finderSummary.append(chip);
+  }
+}
+
+function finderStructureRequestList() {
+  const list = [];
+  for (const [key, count] of state.finderStructures) {
+    for (let i = 0; i < count; i++) list.push(key);
+  }
+  return list;
+}
+
+function structureCountsFromList(list) {
+  const counts = new Map();
+  for (const key of list) counts.set(key, (counts.get(key) || 0) + 1);
+  return counts;
+}
+
 function setAllBiomes(active) {
-  for (const id of Object.keys(state.biomeVis)) state.biomeVis[id] = active;
+  for (const id of Object.keys(state.biomeVis)) state.biomeVis[id] = true;
+  state.highlightedBiome = null;
   rebuildBiomeTileCanvases();
   buildSidebar();
+  if (!active) showToast("Biome highlight cleared");
 }
 
 function toggleBiome(id) {
-  state.biomeVis[id] = !state.biomeVis[id];
+  for (const biomeId of Object.keys(state.biomeVis)) state.biomeVis[biomeId] = true;
+  if (isCaveBiomeId(id)) {
+    state.highlightedBiome = null;
+    rebuildBiomeTileCanvases();
+    buildSidebar();
+    showToast(`${biomeName(Number(id))} is hidden on surface map`);
+    return;
+  }
+  state.highlightedBiome = state.highlightedBiome === id ? null : id;
   rebuildBiomeTileCanvases();
   buildSidebar();
+  showToast(state.highlightedBiome ? `${biomeName(Number(id))} highlighted` : "Biome highlight cleared");
 }
 
 function buildSidebar() {
   invalidateMarkers();
-  buildBiomeSelect();
-  buildFinderStructureSelect();
+  buildFinderBiomePicker();
+  buildFinderStructurePicker();
   els.layerList.innerHTML = "";
   els.layerList.append(
     makeLayerRow("layers", "Biomes", "#57d68d", null, state.showBiomes, () => {
@@ -418,9 +634,11 @@ function makeLayerRow(iconName, label, color, count, active, onClick, options = 
 function makeBiomeRow(biome) {
   const row = document.createElement("button");
   const active = state.biomeVis[biome.id] !== false;
-  row.className = `layer-row biome-row ${active ? "" : "is-off"}`;
+  const highlighted = state.highlightedBiome === biome.id;
+  row.className = `layer-row biome-row ${active ? "" : "is-off"} ${highlighted ? "is-highlighted" : ""}`;
   row.type = "button";
-  row.title = biome.label;
+  row.title = highlighted ? `${biome.label} highlighted` : `Highlight ${biome.label}`;
+  row.setAttribute("aria-pressed", highlighted ? "true" : "false");
   row.style.setProperty("--icon", biome.color);
   row.innerHTML = `
     <span class="biome-swatch" style="background:${biome.color}"></span>

@@ -21,6 +21,7 @@ function render() {
   if (detailedBiomes) {
     queueCoarseFallbacks(range);
     drawBiomes(range);
+    drawHighlightedBiome(range);
     prefetchAround(range);
     drawMapVignette();
   } else {
@@ -117,6 +118,71 @@ function drawBiomes(range, queueVisible = true) {
       }
   }
   if (queuedThisFrame >= queueBudget && queueBudget > 0) requestRender();
+}
+
+function drawHighlightedBiome(range) {
+  if (state.highlightedBiome == null || !state.showBiomes) return;
+  const cfg = LODS[range.lod];
+  const id = Number(state.highlightedBiome);
+  if (isCaveBiomeId(id)) return;
+  const cellPx = cfg.scale / state.zoom;
+  const color = BIOME_COLORS[state.highlightedBiome] || "#d8f6aa";
+  ctx.save();
+  const lineWidth = clamp(cellPx * 0.2, 1.25, 4);
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.shadowColor = "rgba(0,0,0,.45)";
+  ctx.shadowBlur = 3;
+  ctx.strokeStyle = "rgba(5, 10, 12, .72)";
+  ctx.lineWidth = lineWidth + 2.2;
+  drawHighlightedBiomeEdges(range, id, cfg);
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 10;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lineWidth;
+  drawHighlightedBiomeEdges(range, id, cfg);
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = "rgba(255,255,255,.72)";
+  ctx.lineWidth = Math.max(1, lineWidth * 0.34);
+  drawHighlightedBiomeEdges(range, id, cfg);
+  ctx.restore();
+}
+
+function drawHighlightedBiomeEdges(range, id, cfg) {
+  ctx.beginPath();
+  for (let tz = range.tzMin; tz <= range.tzMax; tz++) {
+    for (let tx = range.txMin; tx <= range.txMax; tx++) {
+      const tile = state.tiles.get(tileKey(range.lod, tx, tz));
+      if (!tile?.grid) continue;
+      traceBiomeEdges(tile, id, cfg);
+    }
+  }
+  ctx.stroke();
+}
+
+function traceBiomeEdges(tile, id, cfg) {
+  const s = tile.samples;
+  const grid = tile.displayGrid || tile.grid;
+  const baseX = tile.tx * cfg.blocks;
+  const baseZ = tile.tz * cfg.blocks;
+  const line = (x1, z1, x2, z2) => {
+    const p1 = worldToScreen(x1, z1);
+    const p2 = worldToScreen(x2, z2);
+    ctx.moveTo(p1.x, p1.y);
+    ctx.lineTo(p2.x, p2.y);
+  };
+  for (let z = 0; z < s; z++) {
+    for (let x = 0; x < s; x++) {
+      const i = z * s + x;
+      if (grid[i] !== id) continue;
+      const wx = baseX + x * cfg.scale;
+      const wz = baseZ + z * cfg.scale;
+      if (z === 0 || grid[i - s] !== id) line(wx, wz, wx + cfg.scale, wz);
+      if (x === s - 1 || grid[i + 1] !== id) line(wx + cfg.scale, wz, wx + cfg.scale, wz + cfg.scale);
+      if (z === s - 1 || grid[i + s] !== id) line(wx + cfg.scale, wz + cfg.scale, wx, wz + cfg.scale);
+      if (x === 0 || grid[i - 1] !== id) line(wx, wz + cfg.scale, wx, wz);
+    }
+  }
 }
 
 function drawSeedmapLoadingMap(range) {

@@ -227,8 +227,9 @@ function buildQueuedTiles() {
 function createTile(grid, lod, tx, tz, bitmap = null) {
   const cfg = LODS[lod];
   const s = cfg.samples;
-  if (bitmap && allBiomesVisible()) {
-    return { canvas: bitmap, grid, lod, tx, tz, samples: s, scale: cfg.scale, blocks: cfg.blocks, last: performance.now() };
+  const displayGrid = surfaceBiomeGrid(grid, s);
+  if (bitmap && displayGrid === grid && allBiomesVisible() && state.highlightedBiome == null) {
+    return { canvas: bitmap, grid, displayGrid, lod, tx, tz, samples: s, scale: cfg.scale, blocks: cfg.blocks, last: performance.now() };
   }
   const cnv = document.createElement("canvas");
   cnv.width = s;
@@ -241,7 +242,7 @@ function createTile(grid, lod, tx, tz, bitmap = null) {
     const lz = Math.floor(i / s);
     const worldX = tx * cfg.blocks + lx * cfg.scale;
     const worldZ = tz * cfg.blocks + lz * cfg.scale;
-    const biomeId = grid[i];
+    const biomeId = displayGrid[i];
     const color = biomePixelColor(biomeId, worldX, worldZ);
     const j = i * 4;
     data[j] = (color >> 16) & 255;
@@ -250,7 +251,35 @@ function createTile(grid, lod, tx, tz, bitmap = null) {
     data[j + 3] = 255;
   }
   c.putImageData(img, 0, 0);
-  return { canvas: cnv, grid, lod, tx, tz, samples: s, scale: cfg.scale, blocks: cfg.blocks, last: performance.now() };
+  return { canvas: cnv, grid, displayGrid, lod, tx, tz, samples: s, scale: cfg.scale, blocks: cfg.blocks, last: performance.now() };
+}
+
+function surfaceBiomeGrid(grid, samples) {
+  if (!grid.some(isCaveBiomeId)) return grid;
+  const display = grid.slice();
+  for (let i = 0; i < display.length; i++) {
+    if (!isCaveBiomeId(display[i])) continue;
+    display[i] = nearestSurfaceBiome(grid, i, samples);
+  }
+  return display;
+}
+
+function nearestSurfaceBiome(grid, index, samples) {
+  const x = index % samples;
+  const z = Math.floor(index / samples);
+  for (let radius = 1; radius <= 8; radius++) {
+    for (let dz = -radius; dz <= radius; dz++) {
+      for (let dx = -radius; dx <= radius; dx++) {
+        if (Math.abs(dx) !== radius && Math.abs(dz) !== radius) continue;
+        const nx = x + dx;
+        const nz = z + dz;
+        if (nx < 0 || nz < 0 || nx >= samples || nz >= samples) continue;
+        const id = grid[nz * samples + nx];
+        if (!isCaveBiomeId(id)) return id;
+      }
+    }
+  }
+  return SURFACE_BIOME_FALLBACK;
 }
 
 function allBiomesVisible() {
@@ -260,7 +289,9 @@ function allBiomesVisible() {
 function biomePixelColor(biomeId, worldX, worldZ) {
   const rgb = BIOME_RGB.get(biomeId) || UNKNOWN_BIOME_RGB;
   if (state.biomeVis[String(biomeId)] !== false) {
-    return tintBiome(rgb, worldX >> 4, worldZ >> 4, biomeId);
+    const base = tintBiome(rgb, worldX >> 4, worldZ >> 4, biomeId);
+    if (state.highlightedBiome == null) return base;
+    return highlightedBiomeColor(base, biomeId, worldX, worldZ);
   }
   const shade = 20 + ((Math.abs((worldX >> 5) + (worldZ >> 5)) % 2) * 7);
   return (shade << 16) | ((shade + 4) << 8) | (shade + 8);
@@ -279,6 +310,28 @@ function rebuildBiomeTileCanvases() {
 function tintBiome(rgb, x, z, biomeId) {
 
   return (rgb[0] << 16) | (rgb[1] << 8) | rgb[2];
+}
+
+function highlightedBiomeColor(color, biomeId, worldX, worldZ) {
+  if (isCaveBiomeId(state.highlightedBiome)) return color;
+  const selected = String(biomeId) === String(state.highlightedBiome);
+  if (!selected) {
+    return mixPackedColor(color, 0x10151a, 0.2);
+  }
+  const shimmer = ((worldX >> 4) + (worldZ >> 4)) % 6 === 0 ? 0.18 : 0;
+  return mixPackedColor(color, 0xf5ffdf, 0.12 + shimmer * 0.5);
+}
+
+function mixPackedColor(a, b, t) {
+  const ar = (a >> 16) & 255;
+  const ag = (a >> 8) & 255;
+  const ab = a & 255;
+  const br = (b >> 16) & 255;
+  const bg = (b >> 8) & 255;
+  const bb = b & 255;
+  return ((ar + (br - ar) * t) << 16) |
+    ((ag + (bg - ag) * t) << 8) |
+    (ab + (bb - ab) * t);
 }
 
 function smoothTerrainNoise(x, z) {

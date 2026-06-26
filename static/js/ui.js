@@ -283,14 +283,29 @@ function bindEvents() {
   document.getElementById("select-all-biomes").addEventListener("click", () => setAllBiomes(true));
   document.getElementById("deselect-all-biomes").addEventListener("click", () => setAllBiomes(false));
   els.finderBtn.addEventListener("click", searchMatchingSeeds);
-  els.finderBiome.addEventListener("change", () => {
-    state.finderResults = [];
-    els.finderResults.innerHTML = "";
+  els.finderRadius.addEventListener("input", () => {
+    clearFinderResults();
     updateFinderHint();
   });
-  els.finderStructure.addEventListener("change", () => {
-    state.finderResults = [];
-    els.finderResults.innerHTML = "";
+  els.finderAttempts.addEventListener("change", () => {
+    clearFinderResults();
+    updateFinderHint();
+  });
+  els.finderBiomeFilter.addEventListener("input", buildFinderBiomePicker);
+  els.finderStructureFilter.addEventListener("input", buildFinderStructurePicker);
+  els.finderRadiusPresets.querySelectorAll("[data-radius]").forEach(btn => {
+    btn.addEventListener("click", () => setFinderRadius(Number(btn.dataset.radius)));
+  });
+  document.getElementById("finder-clear-biomes").addEventListener("click", () => {
+    state.finderBiomes.clear();
+    clearFinderResults();
+    buildFinderBiomePicker();
+    updateFinderHint();
+  });
+  document.getElementById("finder-clear-structures").addEventListener("click", () => {
+    state.finderStructures.clear();
+    clearFinderResults();
+    buildFinderStructurePicker();
     updateFinderHint();
   });
   els.finderClose.addEventListener("click", () => setFinderVisible(false));

@@ -62,7 +62,7 @@
             <span>Biomes</span>
             <span>
               <button class="mini-link" id="select-all-biomes" type="button">All</button>
-              <button class="mini-link" id="deselect-all-biomes" type="button">None</button>
+              <button class="mini-link" id="deselect-all-biomes" type="button">Clear</button>
             </span>
           </div>
           <div class="layer-list biome-list" id="biome-list"></div>
@@ -141,15 +141,40 @@
           <button class="icon-only" id="close-finder" type="button" title="Hide seed finder"></button>
         </div>
         <div class="finder-grid">
-          <label class="finder-field wide">
-            <span>Wanted biome</span>
-            <select class="select" id="finder-biome-select" title="Target biome"></select>
+          <label class="finder-field">
+            <span>Radius</span>
+            <input class="number" id="finder-radius-input" type="number" min="256" max="6000" step="250" value="1500" title="Search radius from spawn">
           </label>
-          <label class="finder-field wide">
-            <span>Wanted structure</span>
-            <select class="select" id="finder-structure-select" title="Optional target structure"></select>
+          <label class="finder-field">
+            <span>Scan</span>
+            <select class="select" id="finder-attempts-select" title="Search depth">
+              <option value="100" selected>Fast</option>
+              <option value="160">Balanced</option>
+              <option value="250">Deep</option>
+            </select>
           </label>
           <button class="btn primary" id="find-biome-btn" title="Find matching seeds"></button>
+        </div>
+        <div class="finder-radius-presets" id="finder-radius-presets">
+          <button class="mini-link" type="button" data-radius="750">750</button>
+          <button class="mini-link" type="button" data-radius="1500">1500</button>
+          <button class="mini-link" type="button" data-radius="3000">3000</button>
+          <button class="mini-link" type="button" data-radius="6000">6000</button>
+        </div>
+        <div class="finder-summary" id="finder-summary"></div>
+        <div class="finder-picks">
+          <div class="finder-pick-head">
+            <span>Biomes</span>
+            <button class="mini-link" id="finder-clear-biomes" type="button">Clear</button>
+          </div>
+          <input class="finder-filter" id="finder-biome-filter" type="search" placeholder="Search biomes">
+          <div class="finder-chip-list finder-biome-list" id="finder-biome-list"></div>
+          <div class="finder-pick-head">
+            <span>Structures</span>
+            <button class="mini-link" id="finder-clear-structures" type="button">Clear</button>
+          </div>
+          <input class="finder-filter" id="finder-structure-filter" type="search" placeholder="Search structures">
+          <div class="finder-chip-list finder-structure-list" id="finder-structure-list"></div>
         </div>
         <div class="finder-status" id="finder-status">Pick what you want near spawn, then search.</div>
         <div class="finder-results" id="finder-results"></div>

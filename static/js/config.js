@@ -75,3 +75,9 @@ const MANUAL_SCAN_RADIUS = 3072;
 const MAP_BG = "#17158b";
 const EMPTY_TILE_COLORS = ["#17158b", "#17158b"];
 const UNKNOWN_BIOME_RGB = [38, 45, 41];
+const CAVE_BIOME_IDS = new Set([174, 175, 183]);
+const SURFACE_BIOME_FALLBACK = 1;
+
+function isCaveBiomeId(id) {
+  return CAVE_BIOME_IDS.has(Number(id));
+}

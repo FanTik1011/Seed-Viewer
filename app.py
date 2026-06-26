@@ -681,6 +681,9 @@ def search_seeds():
     available = set(_available_structures(version, "overworld"))
     raw_required = request.args.get('required', '')
     required = [name for name in raw_required.split(',') if name in available]
+    required_counts = {}
+    for name in required:
+        required_counts[name] = required_counts.get(name, 0) + 1
     required_biomes = _parse_biome_ids(request.args.get('biomes', ''))
     if not required and not required_biomes:
         return error("Choose at least one biome or valid structure for this version")
@@ -698,20 +701,21 @@ def search_seeds():
         nearest_biomes = {}
         score = 0.0
 
-        for name in required:
+        for name, needed in required_counts.items():
             x = spawn["x"] - structure_radius
             z = spawn["z"] - structure_radius
             size = structure_radius * 2
             points = _points_for_structure(seed, mc, name, x, z, size, size, "overworld")
-            if not points:
-                return None
-            dist = _nearest_distance(points, spawn)
-            if dist is None or dist > structure_radius * 1.42:
+            if len(points) < needed:
                 return None
             points.sort(key=lambda p: (p["x"] - spawn["x"]) ** 2 + (p["z"] - spawn["z"]) ** 2)
-            found[name] = points[:8]
-            nearest[name] = round(dist)
-            score += dist
+            chosen = points[:needed]
+            distances = [math.hypot(p["x"] - spawn["x"], p["z"] - spawn["z"]) for p in chosen]
+            if not distances or distances[-1] > structure_radius * 1.42:
+                return None
+            found[name] = points[:max(8, needed)]
+            nearest[name] = round(distances[0])
+            score += sum(distances)
 
         for biome_id in required_biomes:
             points, _, used_step = _find_nearest_biome_points(
@@ -753,6 +757,7 @@ def search_seeds():
         "structureRadius": structure_radius,
         "biomeRadius": biome_radius,
         "required": required,
+        "requiredCounts": required_counts,
         "biomes": required_biomes,
         "results": matches[:limit],
     })
