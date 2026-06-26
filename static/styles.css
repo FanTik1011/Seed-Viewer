@@ -3425,6 +3425,186 @@
     }
   }
 
+  .finder-float {
+    transform-origin: 100% 100% !important;
+    animation: finder-panel-in .28s var(--premium-ease) both !important;
+    transition:
+      opacity .24s var(--premium-ease),
+      transform .28s var(--premium-ease),
+      filter .24s var(--premium-ease),
+      visibility 0s linear 0s !important;
+    will-change: transform, opacity;
+  }
+
+  .finder-float::before {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    z-index: -1;
+    border-radius: inherit;
+    background:
+      radial-gradient(circle at 18% 0%, rgba(140,255,99,.16), transparent 34%),
+      radial-gradient(circle at 88% 100%, rgba(92,200,242,.12), transparent 38%);
+    opacity: .9;
+    pointer-events: none;
+  }
+
+  .finder-float.is-hidden {
+    display: grid !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+    transform: translateY(18px) scale(.94) !important;
+    filter: blur(2px) saturate(.9) !important;
+    transition:
+      opacity .2s ease,
+      transform .24s var(--premium-ease),
+      filter .2s ease,
+      visibility 0s linear .24s !important;
+  }
+
+  body:not(.finder-hidden) .finder-float {
+    visibility: visible !important;
+    opacity: 1 !important;
+    transform: translateY(0) scale(1) !important;
+    pointer-events: auto !important;
+  }
+
+  .finder-open-btn {
+    min-width: 148px !important;
+    justify-content: center !important;
+    opacity: 0 !important;
+    transform: translateY(14px) scale(.92) !important;
+    pointer-events: none !important;
+    transition:
+      opacity .2s var(--premium-ease),
+      transform .24s var(--premium-ease),
+      filter .2s ease,
+      box-shadow .2s ease !important;
+  }
+
+  .finder-open-btn.visible {
+    opacity: 1 !important;
+    transform: translateY(0) scale(1) !important;
+    pointer-events: auto !important;
+    animation: finder-open-pulse 2.4s ease-in-out infinite !important;
+  }
+
+  .finder-open-btn.visible:hover {
+    transform: translateY(-2px) scale(1.02) !important;
+    filter: brightness(1.08);
+  }
+
+  .finder-head {
+    cursor: default;
+  }
+
+  .finder-head .icon-only {
+    transition: transform .18s var(--premium-ease), background .18s ease, color .18s ease !important;
+  }
+
+  .finder-head .icon-only:hover {
+    transform: rotate(90deg) scale(1.04);
+    background: rgba(255,255,255,.12);
+    color: white;
+  }
+
+  .finder-summary-chip,
+  .finder-chip,
+  .finder-chip-wrap,
+  .seed-result-card {
+    animation: finder-item-in .22s var(--premium-ease) both;
+  }
+
+  .finder-chip.is-selected {
+    animation: finder-chip-selected .24s var(--premium-ease) both;
+  }
+
+  .finder-status {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .finder-status::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,.08), transparent);
+    transform: translateX(-120%);
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .finder-float:not(.is-hidden) .finder-status::after {
+    animation: finder-status-sheen 3.2s ease-in-out infinite;
+  }
+
+  @keyframes finder-panel-in {
+    from {
+      opacity: 0;
+      transform: translateY(18px) scale(.96);
+      filter: blur(2px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+      filter: blur(0);
+    }
+  }
+
+  @keyframes finder-item-in {
+    from {
+      opacity: 0;
+      transform: translateY(5px) scale(.98);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  @keyframes finder-chip-selected {
+    0% { transform: scale(.96); }
+    70% { transform: scale(1.03); }
+    100% { transform: scale(1); }
+  }
+
+  @keyframes finder-open-pulse {
+    0%, 100% {
+      box-shadow: 0 18px 48px rgba(0, 0, 0, .48), 0 0 0 0 rgba(140,255,99,0);
+    }
+    50% {
+      box-shadow: 0 18px 48px rgba(0, 0, 0, .48), 0 0 0 5px rgba(140,255,99,.12);
+    }
+  }
+
+  @keyframes finder-status-sheen {
+    0%, 70% {
+      opacity: 0;
+      transform: translateX(-120%);
+    }
+    82% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+      transform: translateX(120%);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .finder-float,
+    .finder-open-btn,
+    .finder-summary-chip,
+    .finder-chip,
+    .finder-chip-wrap,
+    .seed-result-card,
+    .finder-status::after {
+      animation: none !important;
+      transition: none !important;
+    }
+  }
+
   .features-panel .biome-row.is-highlighted {
     color: #ffffff !important;
     background:

@@ -115,6 +115,19 @@ function toggleBottomMenu() {
 function setFinderVisible(visible) {
   els.finderPanel.classList.toggle("is-hidden", !visible);
   els.finderOpen.classList.toggle("visible", !visible);
+  els.finderPanel.setAttribute("aria-hidden", String(!visible));
+  els.finderOpen.setAttribute("aria-expanded", String(visible));
+  els.finderClose.setAttribute("aria-expanded", String(visible));
+  document.body.classList.toggle("finder-hidden", !visible);
+  if (visible) {
+    requestAnimationFrame(() => {
+      if (els.finderBiomeFilter) els.finderBiomeFilter.focus({ preventScroll: true });
+    });
+  } else {
+    requestAnimationFrame(() => {
+      if (els.finderOpen) els.finderOpen.focus({ preventScroll: true });
+    });
+  }
 }
 
 function goToCoordinates() {
@@ -310,6 +323,11 @@ function bindEvents() {
   });
   els.finderClose.addEventListener("click", () => setFinderVisible(false));
   els.finderOpen.addEventListener("click", () => setFinderVisible(true));
+  window.addEventListener("keydown", event => {
+    if (event.key === "Escape" && !els.finderPanel.classList.contains("is-hidden")) {
+      setFinderVisible(false);
+    }
+  });
   document.getElementById("go-btn").addEventListener("click", goToCoordinates);
   els.gotoX.addEventListener("keydown", event => { if (event.key === "Enter") goToCoordinates(); });
   els.gotoZ.addEventListener("keydown", event => { if (event.key === "Enter") goToCoordinates(); });

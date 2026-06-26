@@ -74,8 +74,10 @@ function updateHud() {
 
 function updateChunkPill() {
   const n = state.pendingTiles.size + state.tileQueue.size;
+  const retrying = [...state.tileQueue.values()].filter(job => (job.attempts || 0) > 0).length;
   const visible = state.loaded && n > 0;
-  const text = n === 1 ? "Loading 1 chunk" : `Loading ${n} chunks`;
+  const base = n === 1 ? "Loading 1 chunk" : `Loading ${n} chunks`;
+  const text = retrying ? `${base}, retrying ${retrying}` : base;
   const key = `${visible}|${text}`;
   if (key === chunkPillCache) return;
   chunkPillCache = key;

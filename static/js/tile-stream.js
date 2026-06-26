@@ -54,11 +54,24 @@ function pumpTiles() {
   refreshTilePriorities();
   const sorted = [...state.tileQueue.values()].sort((a, b) => a.priority - b.priority);
   let i = 0;
+  const now = performance.now();
   while (state.pendingTiles.size < MAX_TILE_REQUESTS && i < sorted.length) {
     const next = sorted[i++];
+    if (next.retryAt && next.retryAt > now) continue;
     state.tileQueue.delete(tileKey(next.lod, next.tx, next.tz));
     loadTile(next);
   }
+  if (state.pendingTiles.size < MAX_TILE_REQUESTS && [...state.tileQueue.values()].some(job => job.retryAt && job.retryAt > now)) {
+    scheduleTilePumpLater();
+  }
+}
+
+function scheduleTilePumpLater(delay = 380) {
+  if (tileRetryPumpTimer) return;
+  tileRetryPumpTimer = setTimeout(() => {
+    tileRetryPumpTimer = 0;
+    pumpTiles();
+  }, delay);
 }
 
 function pruneTileQueue() {
@@ -104,6 +117,10 @@ function cancelStaleTileRequests() {
 }
 
 function cancelAllTileRequests() {
+  if (tileRetryPumpTimer) {
+    clearTimeout(tileRetryPumpTimer);
+    tileRetryPumpTimer = 0;
+  }
   if (!state.pendingTiles.size) return;
   for (const pending of state.pendingTiles.values()) {
     pending.request?.cancel?.();
@@ -140,8 +157,10 @@ function requeueTile(job) {
   if (state.tiles.has(key) || state.pendingTiles.has(key) || state.tileQueue.has(key)) return;
   const attempts = (job.attempts || 0) + 1;
   const priority = tilePriority(job.lod, job.tx, job.tz, job.visible, attempts);
-  state.tileQueue.set(key, { lod: job.lod, tx: job.tx, tz: job.tz, priority, visible: job.visible, runId: job.runId, attempts });
+  const retryAt = performance.now() + TILE_RETRY_BASE_DELAY * Math.pow(1.75, attempts - 1);
+  state.tileQueue.set(key, { lod: job.lod, tx: job.tx, tz: job.tz, priority, visible: job.visible, runId: job.runId, attempts, retryAt });
   if (state.tileQueue.size > MAX_TILE_QUEUE) pruneTileQueue();
+  scheduleTilePumpLater(TILE_RETRY_BASE_DELAY);
 }
 
 async function loadTile(job) {

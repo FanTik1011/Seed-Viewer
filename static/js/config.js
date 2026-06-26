@@ -4,21 +4,25 @@ const TILE_BLOCKS = 256;
 const WORKER_URL = `${BASE_PATH}/static/seed-worker.js`;
 const SAMPLE_SCALE = 8;
 const TILE_SAMPLES = TILE_BLOCKS / SAMPLE_SCALE;
+const IS_LOCAL_HOST = /^(localhost|127\.0\.0\.1|\[?::1\]?)$/.test(window.location.hostname);
 const MAX_TILE_CACHE = 650;
 const MAX_TILE_QUEUE = 120;
-const MAX_TILE_REQUESTS = Math.max(2, Math.min(4, Math.floor((navigator.hardwareConcurrency || 4) / 2)));
+const MAX_TILE_REQUESTS = IS_LOCAL_HOST
+  ? Math.max(2, Math.min(4, Math.floor((navigator.hardwareConcurrency || 4) / 2)))
+  : 2;
 const MAX_DRAW_TILES = 240;
-const TILE_REQUEST_TIMEOUT = 9000;
+const TILE_REQUEST_TIMEOUT = IS_LOCAL_HOST ? 12000 : 24000;
 
 const STRUCT_REQUEST_TIMEOUT = 15000;
-const MAX_TILE_ATTEMPTS = 3;
-const TILE_RETRY_PENALTY = 4000;
+const MAX_TILE_ATTEMPTS = IS_LOCAL_HOST ? 3 : 4;
+const TILE_RETRY_PENALTY = 5500;
+const TILE_RETRY_BASE_DELAY = IS_LOCAL_HOST ? 450 : 1100;
 const PREFETCH_MARGIN = 0;
-const MAX_TILE_ENQUEUE_PER_RENDER = 10;
-const MAX_TILE_QUEUE_WHILE_LOADING = 36;
+const MAX_TILE_ENQUEUE_PER_RENDER = IS_LOCAL_HOST ? 10 : 6;
+const MAX_TILE_QUEUE_WHILE_LOADING = IS_LOCAL_HOST ? 36 : 22;
 const TILE_VIEW_MARGIN = 0;
-const TILE_QUEUE_VIEW_MARGIN = 0;
-const TILE_RESULT_KEEP_MARGIN = 0;
+const TILE_QUEUE_VIEW_MARGIN = 1;
+const TILE_RESULT_KEEP_MARGIN = 1;
 
 const MARKER_LITE_LIMIT = 200;
 const MARKER_LABEL_LIMIT = 50;
@@ -45,12 +49,12 @@ const STRUCT_FAST_TYPES = [
   "Desert_Temple", "Jungle_Temple", "Witch_Hut", "Igloo"
 ];
 
-const WORKER_POOL_SIZE = Math.max(2, Math.min(3, Math.ceil((navigator.hardwareConcurrency || 4) / 3)));
+const WORKER_POOL_SIZE = Math.max(1, Math.min(MAX_TILE_REQUESTS, Math.ceil((navigator.hardwareConcurrency || 4) / 3)));
 const VISIBLE_TILE_PRIORITY_BOOST = 1_000_000;
 const COARSE_TILE_PRIORITY_BOOST = 500_000;
 const TILE_BUILD_BATCH = 6;
 const TILE_BUILD_FRAME_BUDGET = 4;
-const TILE_PENDING_VIEW_MARGIN = 2;
+const TILE_PENDING_VIEW_MARGIN = IS_LOCAL_HOST ? 2 : 3;
 
 const MODERN_LODS = [
   { blocks: 256,   samples: 32,  scale: 8  },

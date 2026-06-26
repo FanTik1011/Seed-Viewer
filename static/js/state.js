@@ -111,6 +111,7 @@ let urlTimer = 0;
 let autoLoadTimer = 0;
 let tileBuildPending = false;
 let tilePumpPending = false;
+let tileRetryPumpTimer = 0;
 const tileBuildQueue = [];
 const markerImageCache = new Map();
 const labelWidthCache = new Map();
