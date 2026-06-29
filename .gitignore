@@ -7,4 +7,4 @@ server-*.log
 .env
 libseedmap.dll
 .agents/
-.claude/
+
