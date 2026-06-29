@@ -13,23 +13,48 @@
       <div class="brand-mark" id="brand-icon"></div>
       <div class="brand-text">
         <strong>Map</strong>
-        <span>Java seeds</span>
+        <span id="edition-label">Java seeds</span>
       </div>
     </div>
 
     <div class="seed-form">
       <input class="field" id="seed-input" type="text" placeholder="Seed number or text">
       <select class="select" id="version-select" title="Minecraft version">
-        <option value="26.1">Java 26.1</option>
-        <option value="1.21">Java 1.21</option>
-        <option value="1.20" selected>Java 1.20</option>
-        <option value="1.19">Java 1.19</option>
-        <option value="1.18">Java 1.18</option>
-        <option value="1.17">Java 1.17</option>
-        <option value="1.16">Java 1.16</option>
+        <optgroup label="Java Edition">
+          <option value="26.1">Java 26.1</option>
+          <option value="1.21">Java 1.21</option>
+          <option value="1.20" selected>Java 1.20</option>
+          <option value="1.19">Java 1.19</option>
+          <option value="1.18">Java 1.18</option>
+          <option value="1.17">Java 1.17</option>
+          <option value="1.16">Java 1.16</option>
+        </optgroup>
+        <optgroup label="Bedrock Edition">
+          <option value="bedrock_26.30">Bedrock 26.30</option>
+          <option value="bedrock_26.20">Bedrock 26.20</option>
+          <option value="bedrock_26.0">Bedrock 26.0</option>
+          <option value="bedrock_1.21.120">Bedrock 1.21.120</option>
+          <option value="bedrock_1.21.111">Bedrock 1.21.111</option>
+          <option value="bedrock_1.21.110">Bedrock 1.21.110</option>
+          <option value="bedrock_1.21.100">Bedrock 1.21.100</option>
+          <option value="bedrock_1.21.90">Bedrock 1.21.90</option>
+          <option value="bedrock_1.21.80">Bedrock 1.21.80</option>
+          <option value="bedrock_1.21.70">Bedrock 1.21.70</option>
+          <option value="bedrock_1.21.60">Bedrock 1.21.60</option>
+          <option value="bedrock_1.21.50">Bedrock 1.21.50</option>
+          <option value="bedrock_1.21">Bedrock 1.21</option>
+          <option value="bedrock_1.20.60">Bedrock 1.20.60</option>
+          <option value="bedrock_1.20">Bedrock 1.20</option>
+          <option value="bedrock_1.19">Bedrock 1.19</option>
+          <option value="bedrock_1.18">Bedrock 1.18</option>
+          <option value="bedrock_1.17">Bedrock 1.17</option>
+          <option value="bedrock_1.16">Bedrock 1.16</option>
+        </optgroup>
       </select>
       <select class="select" id="dimension-select" title="Dimension">
         <option value="overworld" selected>Overworld</option>
+        <option value="nether">Nether</option>
+        <option value="end">The End</option>
       </select>
       <button class="btn ghost" id="random-btn" title="Generate random seed"></button>
     </div>

@@ -6,3 +6,5 @@ __pycache__/
 server-*.log
 .env
 libseedmap.dll
+.agents/
+.claude/

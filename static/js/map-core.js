@@ -35,19 +35,28 @@ function dimensionCaps(dimension = state.dimension) {
   };
 }
 
-function dimensionFeatureSet(dimension = state.dimension) {
+function dimensionFeatureSet(dimension = state.dimension, version = state.version) {
+  if (isBedrockVersion(version)) {
+    if (dimension === "nether") return BEDROCK_NETHER_FEATURES;
+    if (dimension === "end") return BEDROCK_END_FEATURES;
+    return BEDROCK_OVERWORLD_FEATURES;
+  }
   if (dimension === "nether") return NETHER_FEATURES;
   if (dimension === "end") return END_FEATURES;
   return OVERWORLD_FEATURES;
 }
 
 function isFeatureAvailable(key, version = state.version, dimension = state.dimension) {
-  const set = dimensionFeatureSet(dimension);
+  const set = dimensionFeatureSet(dimension, version);
   if (!set.has(key)) return false;
+  if (isBedrockVersion(version) && (key === "Ancient_City" && !versionAtLeast(version, "1.19"))) return false;
+  if (isBedrockVersion(version) && (key === "Trail_Ruins" && !versionAtLeast(version, "1.20"))) return false;
+  if (isBedrockVersion(version) && (key === "Trial_Chambers" && !versionAtLeast(version, "1.21"))) return false;
+  if (isBedrockVersion(version)) return true;
   if (OVERWORLD_BASE_FEATURES.has(key)) return true;
   if (dimension === "end" && !dimensionCaps(dimension).structures) return false;
   if (dimension !== "overworld" && (key === "spawn" || key === "Stronghold")) return false;
-  return (VERSION_EXTRAS[version] || new Set()).has(key);
+  return (VERSION_EXTRAS[generationVersion(version)] || new Set()).has(key);
 }
 
 function activeStructureTypes() {
@@ -57,7 +66,7 @@ function activeStructureTypes() {
 }
 
 function usesLegacyBiomeLayers(version = state.version) {
-  return ["1.16", "1.17"].includes(version);
+  return ["1.16", "1.17"].includes(generationVersion(version));
 }
 
 function applyVersionLods(version = state.version) {

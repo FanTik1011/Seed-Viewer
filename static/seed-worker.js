@@ -129,7 +129,9 @@ self.onmessage = async event => {
       });
       data = await getJson(`/api/structures?${params}`, controller?.signal);
     } else if (type === "randomSeed") {
-      data = await getJson("/api/random_seed", controller?.signal);
+      const params = new URLSearchParams();
+      if (payload.version) params.set("version", payload.version);
+      data = await getJson(`/api/random_seed${params.toString() ? `?${params}` : ""}`, controller?.signal);
     } else if (type === "searchSeeds") {
       const params = new URLSearchParams({
         version: payload.version,

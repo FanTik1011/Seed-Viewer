@@ -358,14 +358,20 @@ const VERSION_EXTRAS = {
   "1.19": new Set(["Ruined_Portal","Ruined_Portal_Nether","Geode","Ancient_City","Fortress","Bastion","End_City","End_Gateway","End_Island"]),
   "1.20": new Set(["Ruined_Portal","Ruined_Portal_Nether","Geode","Ancient_City","Trail_Ruins","Fortress","Bastion","End_City","End_Gateway","End_Island"]),
   "1.21": new Set(["Ruined_Portal","Ruined_Portal_Nether","Geode","Ancient_City","Trail_Ruins","Trial_Chambers","Fortress","Bastion","End_City","End_Gateway","End_Island"]),
+  "26.4": new Set(["Ruined_Portal","Ruined_Portal_Nether","Geode","Ancient_City","Trail_Ruins","Trial_Chambers","Fortress","Bastion","End_City","End_Gateway","End_Island"]),
+  "26.3": new Set(["Ruined_Portal","Ruined_Portal_Nether","Geode","Ancient_City","Trail_Ruins","Trial_Chambers","Fortress","Bastion","End_City","End_Gateway","End_Island"]),
+  "26.2": new Set(["Ruined_Portal","Ruined_Portal_Nether","Geode","Ancient_City","Trail_Ruins","Trial_Chambers","Fortress","Bastion","End_City","End_Gateway","End_Island"]),
   "26.1": new Set(["Ruined_Portal","Ruined_Portal_Nether","Geode","Ancient_City","Trail_Ruins","Trial_Chambers","Fortress","Bastion","End_City","End_Gateway","End_Island"])
 };
 const OVERWORLD_FEATURES = new Set(["spawn","Stronghold","Village","Monument","Mansion","Outpost","Ancient_City","Trial_Chambers","Desert_Temple","Jungle_Temple","Witch_Hut","Igloo","Ocean_Ruins","Shipwreck","Ruined_Portal","Treasure","Mineshaft","Desert_Well","Geode","Trail_Ruins"]);
 const NETHER_FEATURES = new Set(["Fortress","Bastion","Ruined_Portal_Nether"]);
 const END_FEATURES = new Set(["End_City","End_Gateway","End_Island"]);
+const BEDROCK_OVERWORLD_FEATURES = new Set(["spawn","Stronghold","Village","Monument","Mansion","Outpost","Ancient_City","Trial_Chambers","Desert_Temple","Jungle_Temple","Witch_Hut","Igloo","Ocean_Ruins","Shipwreck","Ruined_Portal","Treasure","Mineshaft","Trail_Ruins"]);
+const BEDROCK_NETHER_FEATURES = new Set(["Fortress","Bastion","Ruined_Portal_Nether"]);
+const BEDROCK_END_FEATURES = new Set(["End_City"]);
 const OVERWORLD_BASE_FEATURES = new Set(["spawn","Stronghold","Village","Monument","Mansion","Outpost","Desert_Temple","Jungle_Temple","Witch_Hut","Igloo","Ocean_Ruins","Shipwreck","Treasure","Mineshaft","Desert_Well"]);
 const DEFAULT_DISABLED_FEATURES = new Set([
-  "Ocean_Ruins", "Trial_Chambers", "Geode",
+  "Ancient_City", "Ocean_Ruins", "Trial_Chambers", "Geode",
   "Mineshaft", "Ruined_Portal", "Treasure", "Shipwreck", "Trail_Ruins",
   "Dungeon", "Cave", "Ravine", "Lava_Pool", "Apple", "Desert_Well"
 ]);

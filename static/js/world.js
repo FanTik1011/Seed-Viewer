@@ -15,6 +15,7 @@ async function loadWorld(options = {}) {
   els.seedInput.value = seed;
   els.version.value = version;
   els.dimension.value = dimension;
+  updateEditionLabel(version);
   state.loaded = false;
   resetUiCaches();
   cancelWorldWorkerJobs();

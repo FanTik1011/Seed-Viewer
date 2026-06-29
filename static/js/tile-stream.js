@@ -381,7 +381,7 @@ function pruneTileCache() {
 }
 
 function versionAtLeast(version, minimum) {
-  const current = String(version || "0").split(".").map(Number);
+  const current = String(generationVersion(version) || "0").split(".").map(Number);
   const target = String(minimum || "0").split(".").map(Number);
   const size = Math.max(current.length, target.length);
   for (let i = 0; i < size; i++) {

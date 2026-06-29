@@ -1,4 +1,5 @@
 function villageLabelAt(x, z) {
+  if (isBedrockVersion(state.version)) return STRUCT_META.Village.label;
   const biome = biomeAt(x, z);
   if (!biome || biome === "Biome loading" || biome === "Biome unavailable") return STRUCT_META.Village.label;
   const rule = VILLAGE_LABEL_RULES.find(item => item.match(biome));

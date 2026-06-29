@@ -9,17 +9,17 @@ const MAX_TILE_CACHE = 650;
 const MAX_TILE_QUEUE = 120;
 const MAX_TILE_REQUESTS = IS_LOCAL_HOST
   ? Math.max(2, Math.min(4, Math.floor((navigator.hardwareConcurrency || 4) / 2)))
-  : 2;
+  : 4;
 const MAX_DRAW_TILES = 240;
-const TILE_REQUEST_TIMEOUT = IS_LOCAL_HOST ? 12000 : 24000;
+const TILE_REQUEST_TIMEOUT = IS_LOCAL_HOST ? 12000 : 18000;
 
 const STRUCT_REQUEST_TIMEOUT = 15000;
-const MAX_TILE_ATTEMPTS = IS_LOCAL_HOST ? 3 : 4;
+const MAX_TILE_ATTEMPTS = IS_LOCAL_HOST ? 3 : 3;
 const TILE_RETRY_PENALTY = 5500;
-const TILE_RETRY_BASE_DELAY = IS_LOCAL_HOST ? 450 : 1100;
+const TILE_RETRY_BASE_DELAY = IS_LOCAL_HOST ? 450 : 500;
 const PREFETCH_MARGIN = 0;
-const MAX_TILE_ENQUEUE_PER_RENDER = IS_LOCAL_HOST ? 10 : 6;
-const MAX_TILE_QUEUE_WHILE_LOADING = IS_LOCAL_HOST ? 36 : 22;
+const MAX_TILE_ENQUEUE_PER_RENDER = IS_LOCAL_HOST ? 10 : 10;
+const MAX_TILE_QUEUE_WHILE_LOADING = IS_LOCAL_HOST ? 36 : 32;
 const TILE_VIEW_MARGIN = 0;
 const TILE_QUEUE_VIEW_MARGIN = 1;
 const TILE_RESULT_KEEP_MARGIN = 1;
@@ -45,7 +45,7 @@ const MAX_STREAM_MARKERS = 3500;
 const STRUCT_KEEP_RADIUS = 2;          
 const STRUCT_DEFER_DELAY = 140;        
 const STRUCT_FAST_TYPES = [
-  "Village", "Ancient_City", "Mansion", "Monument", "Outpost",
+  "Village", "Mansion", "Monument", "Outpost",
   "Desert_Temple", "Jungle_Temple", "Witch_Hut", "Igloo"
 ];
 
@@ -81,7 +81,45 @@ const EMPTY_TILE_COLORS = ["#17158b", "#17158b"];
 const UNKNOWN_BIOME_RGB = [38, 45, 41];
 const CAVE_BIOME_IDS = new Set([174, 175, 183]);
 const SURFACE_BIOME_FALLBACK = 1;
+const JAVA_VERSION_FALLBACKS = {
+  "26.1": "1.21"
+};
+const BEDROCK_VERSION_FALLBACKS = {
+  "bedrock_26.30": "1.21",
+  "bedrock_26.20": "1.21",
+  "bedrock_26.0": "1.21",
+  "bedrock_1.21.120": "1.21",
+  "bedrock_1.21.111": "1.21",
+  "bedrock_1.21.110": "1.21",
+  "bedrock_1.21.100": "1.21",
+  "bedrock_1.21.90": "1.21",
+  "bedrock_1.21.80": "1.21",
+  "bedrock_1.21.70": "1.21",
+  "bedrock_1.21.60": "1.21",
+  "bedrock_1.21.50": "1.21",
+  "bedrock_1.21": "1.21",
+  "bedrock_1.20.60": "1.20",
+  "bedrock_1.20": "1.20",
+  "bedrock_1.19": "1.19",
+  "bedrock_1.18": "1.18",
+  "bedrock_1.17": "1.17",
+  "bedrock_1.16": "1.16"
+};
 
 function isCaveBiomeId(id) {
   return CAVE_BIOME_IDS.has(Number(id));
+}
+
+function generationVersion(version) {
+  const value = version == null && typeof state !== "undefined" ? state.version : version;
+  return BEDROCK_VERSION_FALLBACKS[value] || JAVA_VERSION_FALLBACKS[value] || value || "1.20";
+}
+
+function isBedrockVersion(version) {
+  const value = version == null && typeof state !== "undefined" ? state.version : version;
+  return Object.prototype.hasOwnProperty.call(BEDROCK_VERSION_FALLBACKS, value);
+}
+
+function editionLabel(version) {
+  return isBedrockVersion(version) ? "Bedrock seeds" : "Java seeds";
 }

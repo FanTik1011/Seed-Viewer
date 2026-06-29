@@ -4,6 +4,7 @@ const els = {
   seedInput: document.getElementById("seed-input"),
   version: document.getElementById("version-select"),
   dimension: document.getElementById("dimension-select"),
+  editionLabel: document.getElementById("edition-label"),
   menuToggle: document.getElementById("menu-toggle"),
   sidebar: document.querySelector(".sidebar"),
   empty: document.getElementById("empty"),

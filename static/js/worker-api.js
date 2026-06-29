@@ -106,7 +106,9 @@ async function directRequest(type, payload = {}, signal = undefined) {
     });
     url = `${API}/api/structures?${params}`;
   } else if (type === "randomSeed") {
-    url = `${API}/api/random_seed`;
+    const params = new URLSearchParams();
+    if (payload.version) params.set("version", payload.version);
+    url = `${API}/api/random_seed${params.toString() ? `?${params}` : ""}`;
   } else if (type === "searchSeeds") {
     const params = new URLSearchParams({
       version: payload.version,

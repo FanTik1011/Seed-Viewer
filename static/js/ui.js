@@ -1,5 +1,5 @@
 async function randomSeed() {
-  const data = await workerRequest("randomSeed");
+  const data = await workerRequest("randomSeed", { version: els.version.value });
   els.seedInput.value = data.seed;
   loadWorld({ seed: data.seed, version: els.version.value, dimension: els.dimension.value });
 }
@@ -76,6 +76,11 @@ function shareUrl() {
     return;
   }
   copyText(buildShareUrl(), "Share URL copied");
+}
+
+function updateEditionLabel(version = els.version.value) {
+  if (!els.editionLabel) return;
+  els.editionLabel.textContent = editionLabel(version);
 }
 
 function scheduleAutoLoad(delay = 900) {
@@ -355,6 +360,7 @@ function bindEvents() {
     requestRender();
   });
   els.version.addEventListener("change", () => {
+    updateEditionLabel(els.version.value);
     if (state.loaded) loadWorld({ seed: state.seed, version: els.version.value, dimension: els.dimension.value, centerX: state.viewX, centerZ: state.viewZ, zoom: state.zoom });
     else scheduleAutoLoad(0);
   });
@@ -379,6 +385,7 @@ function hydrateFromUrl() {
   if (version && [...els.version.options].some(option => option.value === version)) {
     els.version.value = version;
   }
+  updateEditionLabel(els.version.value);
   if (dimension) {
     els.dimension.value = dimension;
     state.dimension = dimension;
@@ -402,8 +409,13 @@ function parseDimension(value) {
 
 function platformToVersion(platform) {
   if (!platform) return "";
-  const match = String(platform).match(/java_(\d+)_(\d+)/);
-  return match ? `${match[1]}.${match[2]}` : "";
+  const value = String(platform);
+  const javaMatch = value.match(/java_(\d+)_(\d+)/);
+  if (javaMatch) return `${javaMatch[1]}.${javaMatch[2]}`;
+  const bedrockMatch = value.match(/bedrock[_-](\d+)(?:[_-](\d+))?(?:[_-](\d+))?/);
+  if (!bedrockMatch) return "";
+  const parts = bedrockMatch.slice(1).filter(Boolean);
+  return `bedrock_${parts.join(".")}`;
 }
 
 function parseNumberParam(value) {
