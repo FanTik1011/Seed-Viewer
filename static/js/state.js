@@ -80,7 +80,7 @@ const state = {
   structFetched: new Set(),
   structSeen: {},
   showBiomes: true,
-  showGrid: false,
+  showGrid: true,
   showAxes: false,
   biomeVis: Object.fromEntries(Object.keys(BIOME_NAMES).map(id => [id, true])),
   highlightedBiome: null,

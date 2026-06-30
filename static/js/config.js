@@ -5,21 +5,23 @@ const WORKER_URL = `${BASE_PATH}/static/seed-worker.js`;
 const SAMPLE_SCALE = 8;
 const TILE_SAMPLES = TILE_BLOCKS / SAMPLE_SCALE;
 const IS_LOCAL_HOST = /^(localhost|127\.0\.0\.1|\[?::1\]?)$/.test(window.location.hostname);
-const MAX_TILE_CACHE = 650;
-const MAX_TILE_QUEUE = 120;
-const MAX_TILE_REQUESTS = IS_LOCAL_HOST
-  ? Math.max(2, Math.min(4, Math.floor((navigator.hardwareConcurrency || 4) / 2)))
-  : 4;
-const MAX_DRAW_TILES = 240;
-const TILE_REQUEST_TIMEOUT = IS_LOCAL_HOST ? 12000 : 18000;
+const PERF_MODE = String(window.SEED_VIEWER_PERF_MODE || "").toLowerCase();
+const IS_HEROKU = PERF_MODE === "heroku" || /\.herokuapp\.com$/i.test(window.location.hostname);
+const MAX_TILE_CACHE = IS_HEROKU ? 260 : 650;
+const MAX_TILE_QUEUE = IS_HEROKU ? 64 : 120;
+const MAX_TILE_REQUESTS = IS_HEROKU
+  ? 2
+  : IS_LOCAL_HOST ? Math.max(2, Math.min(4, Math.floor((navigator.hardwareConcurrency || 4) / 2))) : 4;
+const MAX_DRAW_TILES = IS_HEROKU ? 120 : 240;
+const TILE_REQUEST_TIMEOUT = IS_HEROKU ? 24000 : IS_LOCAL_HOST ? 12000 : 18000;
 
 const STRUCT_REQUEST_TIMEOUT = 15000;
-const MAX_TILE_ATTEMPTS = IS_LOCAL_HOST ? 3 : 3;
+const MAX_TILE_ATTEMPTS = IS_HEROKU ? 2 : 3;
 const TILE_RETRY_PENALTY = 5500;
 const TILE_RETRY_BASE_DELAY = IS_LOCAL_HOST ? 450 : 500;
 const PREFETCH_MARGIN = 0;
-const MAX_TILE_ENQUEUE_PER_RENDER = IS_LOCAL_HOST ? 40 : 20;
-const MAX_TILE_QUEUE_WHILE_LOADING = IS_LOCAL_HOST ? 120 : 80;
+const MAX_TILE_ENQUEUE_PER_RENDER = IS_HEROKU ? 8 : IS_LOCAL_HOST ? 40 : 20;
+const MAX_TILE_QUEUE_WHILE_LOADING = IS_HEROKU ? 42 : IS_LOCAL_HOST ? 120 : 80;
 const TILE_VIEW_MARGIN = 0;
 const TILE_QUEUE_VIEW_MARGIN = 1;
 const TILE_RESULT_KEEP_MARGIN = 1;
@@ -49,7 +51,7 @@ const STRUCT_FAST_TYPES = [
   "Desert_Temple", "Jungle_Temple", "Witch_Hut", "Igloo"
 ];
 
-const WORKER_POOL_SIZE = Math.max(1, Math.min(MAX_TILE_REQUESTS, Math.ceil((navigator.hardwareConcurrency || 4) / 3)));
+const WORKER_POOL_SIZE = IS_HEROKU ? 1 : Math.max(1, Math.min(MAX_TILE_REQUESTS, Math.ceil((navigator.hardwareConcurrency || 4) / 3)));
 const VISIBLE_TILE_PRIORITY_BOOST = 1_000_000;
 const COARSE_TILE_PRIORITY_BOOST = 500_000;
 const TILE_BUILD_BATCH = 6;
@@ -62,13 +64,19 @@ const MODERN_LODS = [
   { blocks: 4096,  samples: 64,  scale: 64 },
   { blocks: 16384, samples: 256, scale: 64 }
 ];
+const HEROKU_MODERN_LODS = [
+  { blocks: 512,   samples: 32,  scale: 16 },
+  { blocks: 1024,  samples: 64,  scale: 16 },
+  { blocks: 4096,  samples: 64,  scale: 64 },
+  { blocks: 16384, samples: 256, scale: 64 }
+];
 const LEGACY_LODS = [
   { blocks: 256,   samples: 16,  scale: 16 },
   { blocks: 1024,  samples: 64,  scale: 16 },
   { blocks: 4096,  samples: 64,  scale: 64 },
   { blocks: 16384, samples: 256, scale: 64 }
 ];
-let LODS = MODERN_LODS;
+let LODS = IS_HEROKU ? HEROKU_MODERN_LODS : MODERN_LODS;
 const MIN_ZOOM = 0.4;
 const MAX_ZOOM = 8;   
 const DEFAULT_ZOOM = 2;

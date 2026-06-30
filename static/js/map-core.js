@@ -70,7 +70,9 @@ function usesLegacyBiomeLayers(version = state.version) {
 }
 
 function applyVersionLods(version = state.version) {
-  LODS = usesLegacyBiomeLayers(version) ? LEGACY_LODS : MODERN_LODS;
+  LODS = usesLegacyBiomeLayers(version)
+    ? LEGACY_LODS
+    : IS_HEROKU ? HEROKU_MODERN_LODS : MODERN_LODS;
 }
 
 function featureDataLoaded(key) {

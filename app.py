@@ -23,6 +23,7 @@ def _normalise_base_path(value: str) -> str:
 
 
 PUBLIC_BASE_PATH = _normalise_base_path(os.environ.get("PUBLIC_BASE_PATH", ""))
+PUBLIC_PERF_MODE = os.environ.get("PUBLIC_PERF_MODE", "heroku" if os.environ.get("DYNO") else "").strip().lower()
 
 
 class PrefixMiddleware:
@@ -877,7 +878,12 @@ _CACHE_BUST = str(int(_time.time()))
 
 @app.route('/')
 def index():
-    return render_template('index.html', base_path=PUBLIC_BASE_PATH, cache_bust=_CACHE_BUST)
+    return render_template(
+        'index.html',
+        base_path=PUBLIC_BASE_PATH,
+        cache_bust=_CACHE_BUST,
+        perf_mode=PUBLIC_PERF_MODE,
+    )
 
 
 @app.route('/api/versions')

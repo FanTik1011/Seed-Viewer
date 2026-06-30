@@ -276,7 +276,10 @@
   </main>
 </div>
 
-<script>window.SEED_VIEWER_BASE_PATH = "{{ base_path }}";</script>
+<script>
+window.SEED_VIEWER_BASE_PATH = "{{ base_path }}";
+window.SEED_VIEWER_PERF_MODE = {{ perf_mode|tojson }};
+</script>
 <script src="{{ base_path }}/static/js/config.js?v={{ cache_bust }}"></script>
 <script src="{{ base_path }}/static/js/data.js?v={{ cache_bust }}"></script>
 <script src="{{ base_path }}/static/js/state.js?v={{ cache_bust }}"></script>
