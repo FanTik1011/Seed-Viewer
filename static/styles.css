@@ -4887,34 +4887,35 @@
     padding: 6px 10px 6px 6px !important;
     border-radius: 7px !important;
     gap: 9px !important;
-    background: rgba(20,19,36,.95) !important;
-    border-color: rgba(134,129,190,.20) !important;
+    background:
+      linear-gradient(90deg, color-mix(in srgb, var(--chip), transparent 88%) 0%, rgba(14,13,28,.96) 50%) !important;
+    border-color: color-mix(in srgb, var(--chip), transparent 78%) !important;
     transition: background .12s, border-color .12s, box-shadow .12s !important;
   }
 
   .finder-chip:hover {
-    background: rgba(28,26,50,.98) !important;
-    border-color: rgba(22,135,255,.38) !important;
+    background:
+      linear-gradient(90deg, color-mix(in srgb, var(--chip), transparent 75%) 0%, rgba(22,20,42,.98) 55%) !important;
+    border-color: color-mix(in srgb, var(--chip), transparent 55%) !important;
+    box-shadow: 0 2px 12px color-mix(in srgb, var(--chip), transparent 82%) !important;
   }
 
-  /* Biome color swatch — bigger and more prominent */
+  /* Biome color swatch — round pill */
   .finder-chip-dot {
-    width: 30px !important;
-    height: 30px !important;
-    border-radius: 7px !important;
-    background: linear-gradient(180deg, rgba(255,255,255,.12), transparent),
-                color-mix(in srgb, var(--chip), transparent 68%) !important;
-    border-color: color-mix(in srgb, var(--chip), transparent 38%) !important;
-    box-shadow: 0 0 10px color-mix(in srgb, var(--chip), transparent 70%) !important;
+    width: 18px !important;
+    height: 18px !important;
+    border-radius: 50% !important;
+    background:
+      radial-gradient(circle at 35% 35%, rgba(255,255,255,.35), rgba(0,0,0,.20)),
+      var(--chip) !important;
+    border: 1.5px solid rgba(255,255,255,.22) !important;
+    box-shadow: 0 2px 6px color-mix(in srgb, var(--chip), transparent 50%),
+                inset 0 1px rgba(255,255,255,.25) !important;
     flex-shrink: 0 !important;
   }
 
   .finder-chip-dot::before {
-    width: 14px !important;
-    height: 14px !important;
-    border-radius: 4px !important;
-    background: var(--chip) !important;
-    box-shadow: 0 2px 6px color-mix(in srgb, var(--chip), transparent 50%) !important;
+    display: none !important;
   }
 
   /* Structure icon container */
@@ -4934,19 +4935,21 @@
     color: #e4e3ff !important;
   }
 
-  /* Selected chip: glow + left accent */
+  /* Selected chip: strong glow + left accent + brighter background */
   .finder-chip.is-selected {
-    background: linear-gradient(90deg, color-mix(in srgb, var(--chip, #1d8cff), transparent 55%), rgba(28,27,48,.97) 65%) !important;
-    border-color: color-mix(in srgb, var(--chip, #1d8cff), transparent 30%) !important;
+    background:
+      linear-gradient(90deg, color-mix(in srgb, var(--chip, #1d8cff), transparent 45%) 0%, rgba(20,18,38,.98) 60%) !important;
+    border-color: color-mix(in srgb, var(--chip, #1d8cff), transparent 20%) !important;
     box-shadow:
       inset 3px 0 0 var(--chip, var(--ui-blue)),
-      0 0 0 1px color-mix(in srgb, var(--chip, #1d8cff), transparent 62%),
-      0 4px 14px color-mix(in srgb, var(--chip, #1d8cff), transparent 80%) !important;
+      0 0 0 1px color-mix(in srgb, var(--chip, #1d8cff), transparent 50%),
+      0 4px 18px color-mix(in srgb, var(--chip, #1d8cff), transparent 72%) !important;
   }
 
   .finder-chip.is-selected .finder-chip-dot {
-    box-shadow: 0 0 14px color-mix(in srgb, var(--chip), transparent 50%) !important;
-    border-color: color-mix(in srgb, var(--chip), transparent 20%) !important;
+    box-shadow: 0 2px 14px color-mix(in srgb, var(--chip), transparent 35%),
+                inset 0 1px rgba(255,255,255,.25) !important;
+    border-color: rgba(255,255,255,.28) !important;
   }
 
   /* Remove (−) button */
