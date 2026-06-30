@@ -9,6 +9,7 @@ import logging
 import math
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
+from threading import RLock
 
 logging.basicConfig(
     level=logging.INFO,
@@ -285,6 +286,7 @@ MAX_SEARCH_RADIUS   = 6000
 MAX_BIOME_FIND_SAMPLES = 65000
 OVERWORLD_BIOME_SCALES = {1, 4, 16, 64, 256}
 DIMENSION_BIOME_SCALES = {1, 4, 16, 64}
+NATIVE_LOCK = RLock()
 
 def seed_to_int(seed_str: str) -> int:
     s = seed_str.strip()
@@ -338,7 +340,8 @@ def _int_arg(name: str, default: int, lo: int | None = None, hi: int | None = No
 
 def ctypes_call(fn, *args):
     try:
-        return fn(*args)
+        with NATIVE_LOCK:
+            return fn(*args)
     except Exception as exc:
         log.error("ctypes call failed: %s", exc, exc_info=True)
         raise RuntimeError("Native library call failed") from exc
@@ -862,15 +865,25 @@ def _biome_grid_cached(seed: int, mc: int, dim_id: int,
     allowed_scales = _allowed_biome_scales(dim_id)
     if scale not in allowed_scales:
         raise RuntimeError(f"Unsupported biome scale: {scale}. Valid scales: {sorted(allowed_scales)}")
-    if dim_id == 0:
-        ptr = ctypes_call(lib.get_biome_grid, seed, mc, x, z, w, h, scale)
-    else:
-        ptr = ctypes_call(lib.get_biome_grid_dim, seed, mc, dim_id, x, z, w, h, scale)
-    if not ptr:
-        raise RuntimeError("Biome generation failed")
     n = w * h
-    grid = tuple(ptr[:n])
-    lib.free_array(ptr)
+    try:
+        with NATIVE_LOCK:
+            ptr = None
+            if dim_id == 0:
+                ptr = lib.get_biome_grid(seed, mc, x, z, w, h, scale)
+            else:
+                ptr = lib.get_biome_grid_dim(seed, mc, dim_id, x, z, w, h, scale)
+            if not ptr:
+                raise RuntimeError("Biome generation failed")
+            try:
+                grid = tuple(ptr[:n])
+            finally:
+                lib.free_array(ptr)
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        log.error("Biome grid generation failed: %s", exc, exc_info=True)
+        raise RuntimeError("Biome generation failed") from exc
     return grid
 
 
