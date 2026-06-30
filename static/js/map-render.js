@@ -11,20 +11,17 @@ function render() {
   const lod = pickLod();
   const range = biomeTileRange(lod);
   const detailedBiomes = canStreamBiomes && state.showBiomes && range.count <= MAX_DRAW_TILES && range.tilePx >= 10;
-  const pauseBiomeLoading = zoomTileLoadingPaused || zoomRaf;
   els.distanceNote.classList.toggle("visible", state.showBiomes && !detailedBiomes);
   els.distanceNote.querySelector("span").textContent = canStreamBiomes
     ? "Zoom in to stream detailed biomes"
     : "Biome streaming for this dimension needs a rebuilt native library";
-  if (!pauseBiomeLoading) {
-    trimTileQueueToView(range);
-    cancelStaleTileRequests();
-    dropStaleTileBuilds();
-  }
+  trimTileQueueToView(range);
+  cancelStaleTileRequests();
+  dropStaleTileBuilds();
   if (detailedBiomes) {
-    drawBiomes(range, !pauseBiomeLoading);
+    drawBiomes(range);
     drawHighlightedBiome(range);
-    if (!pauseBiomeLoading) prefetchAround(range);
+    prefetchAround(range);
     drawMapVignette();
   } else {
     drawSeedmapLoadingMap(range);
@@ -36,13 +33,13 @@ function render() {
   updateHud();
   if (!mapIsMoving()) updateSelectedPanel();
   updateChunkPill();
-  if (!pauseBiomeLoading) pumpTiles();
+  pumpTiles();
   if (!mapIsMoving()) scheduleStructureStream(320);
 }
 
 function prefetchAround(range) {
 
-  if (!state.showBiomes || !dimensionCaps().biomes || mapIsMoving() || zoomTileLoadingPaused) return;
+  if (!state.showBiomes || !dimensionCaps().biomes || mapIsMoving()) return;
   if (state.pendingTiles.size > MAX_TILE_REQUESTS / 2 || state.tileQueue.size > MAX_TILE_QUEUE * .35) return;
   for (let tz = range.tzMin - PREFETCH_MARGIN; tz <= range.tzMax + PREFETCH_MARGIN; tz++) {
     for (let tx = range.txMin - PREFETCH_MARGIN; tx <= range.txMax + PREFETCH_MARGIN; tx++) {
@@ -73,7 +70,7 @@ function queueCoarseFallbacks(range) {
 
 function mapIsMoving() {
 
-  return !!((dragStart && pointerMoved) || momentumRaf || zoomRaf || zoomTileLoadingPaused);
+  return !!((dragStart && pointerMoved) || momentumRaf || zoomRaf);
 }
 
 function drawFallbackTile(fineLod, tx, tz, px, pz, pxSize) {
@@ -118,6 +115,8 @@ function drawBiomes(range, queueVisible = true) {
       if (state.showBiomes && tile) {
         tile.last = performance.now();
         ctx.drawImage(tile.canvas, px, pz, pxSize, pxSize);
+      } else if (state.showBiomes && !loading && drawFallbackTile(range.lod, tx, tz, px, pz, pxSize)) {
+        // coarse LOD only when tile has genuinely given up (not in queue or pending)
       } else {
         drawPendingTile(pos, tilePx, item.dist);
       }
@@ -130,81 +129,64 @@ function drawHighlightedBiome(range) {
   const cfg = LODS[range.lod];
   const id = Number(state.highlightedBiome);
   if (isCaveBiomeId(id)) return;
+  const cellPx = cfg.scale / state.zoom;
   const color = BIOME_COLORS[state.highlightedBiome] || "#d8f6aa";
-  let deferred = false;
   ctx.save();
-  ctx.imageSmoothingEnabled = false;
+  const lineWidth = clamp(cellPx * 0.2, 1.25, 4);
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.shadowColor = "rgba(0,0,0,.45)";
+  ctx.shadowBlur = 3;
+  ctx.strokeStyle = "rgba(5, 10, 12, .72)";
+  ctx.lineWidth = lineWidth + 2.2;
+  drawHighlightedBiomeEdges(range, id, cfg);
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 10;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lineWidth;
+  drawHighlightedBiomeEdges(range, id, cfg);
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = "rgba(255,255,255,.72)";
+  ctx.lineWidth = Math.max(1, lineWidth * 0.34);
+  drawHighlightedBiomeEdges(range, id, cfg);
+  ctx.restore();
+}
+
+function drawHighlightedBiomeEdges(range, id, cfg) {
+  ctx.beginPath();
   for (let tz = range.tzMin; tz <= range.tzMax; tz++) {
     for (let tx = range.txMin; tx <= range.txMax; tx++) {
       const tile = state.tiles.get(tileKey(range.lod, tx, tz));
       if (!tile?.grid) continue;
-      const mask = highlightedBiomeMask(tile, id, color);
-      if (mask === undefined) {
-        deferred = true;
-        continue;
-      }
-      if (!mask) continue;
-      const tilePx = cfg.blocks / state.zoom;
-      const pos = worldToScreen(tx * cfg.blocks, tz * cfg.blocks);
-      const px = Math.round(pos.x);
-      const pz = Math.round(pos.y);
-      const pxSize = Math.round(pos.x + tilePx) - px + 1;
-      ctx.drawImage(mask, px, pz, pxSize, pxSize);
+      traceBiomeEdges(tile, id, cfg);
     }
   }
-  ctx.restore();
-  if (deferred && !mapIsMoving()) requestRender();
+  ctx.stroke();
 }
 
-function highlightedBiomeMask(tile, id, color) {
-  if (!tile.highlightMasks) tile.highlightMasks = new Map();
-  const cacheKey = `${id}:${color}:${tile.displayGrid === tile.grid ? "raw" : "display"}`;
-  const cached = tile.highlightMasks.get(cacheKey);
-  if (cached !== undefined) return cached;
+function traceBiomeEdges(tile, id, cfg) {
   const s = tile.samples;
   const grid = tile.displayGrid || tile.grid;
-  const rgb = hexToRgb(color) || [216, 246, 170];
-  const cnv = document.createElement("canvas");
-  cnv.width = s;
-  cnv.height = s;
-  const c = cnv.getContext("2d", { alpha: true });
-  const img = c.createImageData(s, s);
-  const data = img.data;
-  let any = false;
+  const baseX = tile.tx * cfg.blocks;
+  const baseZ = tile.tz * cfg.blocks;
+  const line = (x1, z1, x2, z2) => {
+    const p1 = worldToScreen(x1, z1);
+    const p2 = worldToScreen(x2, z2);
+    ctx.moveTo(p1.x, p1.y);
+    ctx.lineTo(p2.x, p2.y);
+  };
   for (let z = 0; z < s; z++) {
     for (let x = 0; x < s; x++) {
       const i = z * s + x;
       if (grid[i] !== id) continue;
-      const edge =
-        z === 0 || grid[i - s] !== id ||
-        x === s - 1 || grid[i + 1] !== id ||
-        z === s - 1 || grid[i + s] !== id ||
-        x === 0 || grid[i - 1] !== id;
-      const j = i * 4;
-      data[j] = edge ? 255 : rgb[0];
-      data[j + 1] = edge ? 255 : rgb[1];
-      data[j + 2] = edge ? 245 : rgb[2];
-      data[j + 3] = edge ? 230 : 128;
-      any = true;
+      const wx = baseX + x * cfg.scale;
+      const wz = baseZ + z * cfg.scale;
+      if (z === 0 || grid[i - s] !== id) line(wx, wz, wx + cfg.scale, wz);
+      if (x === s - 1 || grid[i + 1] !== id) line(wx + cfg.scale, wz, wx + cfg.scale, wz + cfg.scale);
+      if (z === s - 1 || grid[i + s] !== id) line(wx + cfg.scale, wz + cfg.scale, wx, wz + cfg.scale);
+      if (x === 0 || grid[i - 1] !== id) line(wx, wz + cfg.scale, wx, wz);
     }
   }
-  if (!any) {
-    tile.highlightMasks.set(cacheKey, null);
-    return null;
-  }
-  c.putImageData(img, 0, 0);
-  tile.highlightMasks.set(cacheKey, cnv);
-  return cnv;
-}
-
-function hexToRgb(color) {
-  const value = String(color || "").replace("#", "");
-  if (!/^[0-9a-f]{6}$/i.test(value)) return null;
-  return [
-    parseInt(value.slice(0, 2), 16),
-    parseInt(value.slice(2, 4), 16),
-    parseInt(value.slice(4, 6), 16)
-  ];
 }
 
 function drawSeedmapLoadingMap(range) {

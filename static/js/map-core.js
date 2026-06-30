@@ -5,10 +5,6 @@ function resizeCanvas() {
   state.dpr = Math.min(window.devicePixelRatio || 1, 2);
   canvas.width = Math.floor(state.width * state.dpr);
   canvas.height = Math.floor(state.height * state.dpr);
-  if (state.loaded) {
-    state.zoom = clampMapZoom(state.zoom);
-    state.zoomTarget = clampMapZoom(state.zoomTarget || state.zoom);
-  }
   requestRender();
 }
 
@@ -150,43 +146,15 @@ function cancelZoomAnim() {
   }
 }
 
-function beginZoomTilePause() {
-  zoomTileLoadingPaused = true;
-  clearTimeout(zoomTileSettleTimer);
-  cancelTransientTileLoading();
-}
-
-function scheduleZoomTileLoad(delay = ZOOM_TILE_SETTLE_DELAY) {
-  zoomTileLoadingPaused = true;
-  clearTimeout(zoomTileSettleTimer);
-  zoomTileSettleTimer = setTimeout(() => {
-    if (zoomRaf) {
-      scheduleZoomTileLoad(60);
-      return;
-    }
-    zoomTileSettleTimer = 0;
-    zoomTileLoadingPaused = false;
-    const range = biomeTileRange(pickLod());
-    trimTileQueueToView(range);
-    cancelStaleTileRequests();
-    dropStaleTileBuilds();
-    requestRender();
-    pumpTiles();
-    loadVisibleStructuresNow();
-  }, delay);
-}
-
 function startZoomTo(target, sx = state.width / 2, sy = state.height / 2) {
   if (!state.loaded) return;
   cancelMomentum();
   clearTimeout(structureStreamTimer);
   freezeMarkers();
-  beginZoomTilePause();
   const before = screenToWorld(sx, sy);
-  state.zoomTarget = clampMapZoom(target);
+  state.zoomTarget = clamp(target, MIN_ZOOM, MAX_ZOOM);
   state.zoomAnchor = { sx, sy, wx: before.x, wz: before.z };
   if (!zoomRaf) zoomRaf = requestAnimationFrame(animateZoom);
-  scheduleZoomTileLoad();
 }
 
 function animateZoom() {
@@ -196,7 +164,7 @@ function animateZoom() {
     state.zoom = t;
     zoomRaf = 0;
     unfreezeMarkers();
-    scheduleZoomTileLoad(40);
+    loadVisibleStructuresNow();
   } else {
     state.zoom += diff * ZOOM_EASE;
     zoomRaf = requestAnimationFrame(animateZoom);
@@ -241,47 +209,17 @@ function startMomentum(vx, vz) {
 }
 
 function zoomToSlider(z) {
-  const maxZoom = maxSingleBiomeZoom();
-  if (maxZoom <= MIN_ZOOM) return 0;
-  return Math.log(clamp(z, MIN_ZOOM, maxZoom) / MIN_ZOOM) / Math.log(maxZoom / MIN_ZOOM);
+  return Math.log(z / MIN_ZOOM) / Math.log(MAX_ZOOM / MIN_ZOOM);
 }
 
 function sliderToZoom(t) {
-  const maxZoom = maxSingleBiomeZoom();
-  if (maxZoom <= MIN_ZOOM) return MIN_ZOOM;
-  return MIN_ZOOM * Math.pow(maxZoom / MIN_ZOOM, clamp(t, 0, 1));
+  return MIN_ZOOM * Math.pow(MAX_ZOOM / MIN_ZOOM, clamp(t, 0, 1));
 }
 
 function setZoomImmediate(z) {
   cancelZoomAnim();
-  beginZoomTilePause();
-  state.zoom = clampMapZoom(z);
+  state.zoom = clamp(z, MIN_ZOOM, MAX_ZOOM);
   state.zoomTarget = state.zoom;
-  scheduleZoomTileLoad();
-}
-
-function lodTileCountForZoom(lod, zoom) {
-  const cfg = LODS[lod] || LODS[0];
-  const w = Math.max(1, state.width || 1);
-  const h = Math.max(1, state.height || 1);
-  return (Math.ceil(w * zoom / cfg.blocks) + 3) * (Math.ceil(h * zoom / cfg.blocks) + 3);
-}
-
-function maxSingleBiomeZoom() {
-  if (!LODS.length || !state.width || !state.height) return MAX_ZOOM;
-  if (lodTileCountForZoom(0, MAX_ZOOM) <= MAX_DRAW_TILES) return MAX_ZOOM;
-  let lo = MIN_ZOOM;
-  let hi = MAX_ZOOM;
-  for (let i = 0; i < 18; i++) {
-    const mid = (lo + hi) / 2;
-    if (lodTileCountForZoom(0, mid) <= MAX_DRAW_TILES) lo = mid;
-    else hi = mid;
-  }
-  return clamp(lo * 0.985, MIN_ZOOM, MAX_ZOOM);
-}
-
-function clampMapZoom(z) {
-  return clamp(z, MIN_ZOOM, maxSingleBiomeZoom());
 }
 
 function visibleTileRange() {
@@ -299,7 +237,14 @@ function visibleTileRange() {
 }
 
 function pickLod() {
-  return 0;
+  const wWorld = state.width * state.zoom;
+  const hWorld = state.height * state.zoom;
+  for (let i = 0; i < LODS.length - 1; i++) {
+    const b = LODS[i].blocks;
+    const count = (Math.ceil(wWorld / b) + 3) * (Math.ceil(hWorld / b) + 3);
+    if (count <= MAX_DRAW_TILES) return i;
+  }
+  return LODS.length - 1;
 }
 
 function biomeTileRange(lod) {

@@ -1,6 +1,5 @@
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
-import base64
 import ctypes
 import os
 import sys
@@ -9,7 +8,6 @@ import logging
 import math
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
-from threading import RLock
 
 logging.basicConfig(
     level=logging.INFO,
@@ -286,7 +284,6 @@ MAX_SEARCH_RADIUS   = 6000
 MAX_BIOME_FIND_SAMPLES = 65000
 OVERWORLD_BIOME_SCALES = {1, 4, 16, 64, 256}
 DIMENSION_BIOME_SCALES = {1, 4, 16, 64}
-NATIVE_LOCK = RLock()
 
 def seed_to_int(seed_str: str) -> int:
     s = seed_str.strip()
@@ -340,8 +337,7 @@ def _int_arg(name: str, default: int, lo: int | None = None, hi: int | None = No
 
 def ctypes_call(fn, *args):
     try:
-        with NATIVE_LOCK:
-            return fn(*args)
+        return fn(*args)
     except Exception as exc:
         log.error("ctypes call failed: %s", exc, exc_info=True)
         raise RuntimeError("Native library call failed") from exc
@@ -865,25 +861,15 @@ def _biome_grid_cached(seed: int, mc: int, dim_id: int,
     allowed_scales = _allowed_biome_scales(dim_id)
     if scale not in allowed_scales:
         raise RuntimeError(f"Unsupported biome scale: {scale}. Valid scales: {sorted(allowed_scales)}")
+    if dim_id == 0:
+        ptr = ctypes_call(lib.get_biome_grid, seed, mc, x, z, w, h, scale)
+    else:
+        ptr = ctypes_call(lib.get_biome_grid_dim, seed, mc, dim_id, x, z, w, h, scale)
+    if not ptr:
+        raise RuntimeError("Biome generation failed")
     n = w * h
-    try:
-        with NATIVE_LOCK:
-            ptr = None
-            if dim_id == 0:
-                ptr = lib.get_biome_grid(seed, mc, x, z, w, h, scale)
-            else:
-                ptr = lib.get_biome_grid_dim(seed, mc, dim_id, x, z, w, h, scale)
-            if not ptr:
-                raise RuntimeError("Biome generation failed")
-            try:
-                grid = tuple(ptr[:n])
-            finally:
-                lib.free_array(ptr)
-    except RuntimeError:
-        raise
-    except Exception as exc:
-        log.error("Biome grid generation failed: %s", exc, exc_info=True)
-        raise RuntimeError("Biome generation failed") from exc
+    grid = tuple(ptr[:n])
+    lib.free_array(ptr)
     return grid
 
 
@@ -966,25 +952,15 @@ def biomes():
     seed = seed_for_version(seed_str, version)
 
     try:
-        grid = _biome_grid_cached(seed, mc, dim_id, x, z, w, h, scale)
+        grid = list(_biome_grid_cached(seed, mc, dim_id, x, z, w, h, scale))
     except RuntimeError as e:
         return error(str(e), 500)
 
-    if request.args.get("format") == "u8" and all(0 <= value <= 255 for value in grid):
-        payload = {
-            "seed": seed_str, "version": version, "dimension": dimension,
-            "x": x, "z": z, "w": w, "h": h, "scale": scale,
-            "gridEncoding": "u8-b64",
-            "grid": base64.b64encode(bytes(grid)).decode("ascii"),
-        }
-    else:
-        payload = {
-            "seed": seed_str, "version": version, "dimension": dimension,
-            "x": x, "z": z, "w": w, "h": h, "scale": scale,
-            "grid": list(grid),
-        }
-
-    resp = jsonify(payload)
+    resp = jsonify({
+        "seed": seed_str, "version": version, "dimension": dimension,
+        "x": x, "z": z, "w": w, "h": h, "scale": scale,
+        "grid": grid,
+    })
     resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
     return resp
 

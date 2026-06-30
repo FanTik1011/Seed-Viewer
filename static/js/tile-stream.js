@@ -3,18 +3,14 @@ function queueTile(lod, tx, tz, visible = false) {
   if (state.tiles.has(key) || state.pendingTiles.has(key)) return false;
   const existing = state.tileQueue.get(key);
   if (existing) {
-    if (existing.tileGen !== tileLoadGeneration) {
-      state.tileQueue.delete(key);
-    } else {
-      if (visible && !existing.visible) {
-        existing.visible = true;
-        existing.priority = tilePriority(lod, tx, tz, true, existing.attempts || 0);
-      }
-      return false;
+    if (visible && !existing.visible) {
+      existing.visible = true;
+      existing.priority = tilePriority(lod, tx, tz, true, existing.attempts || 0);
     }
+    return false;
   }
   const priority = tilePriority(lod, tx, tz, visible);
-  state.tileQueue.set(key, { lod, tx, tz, priority, visible, runId: state.runId, tileGen: tileLoadGeneration, attempts: 0 });
+  state.tileQueue.set(key, { lod, tx, tz, priority, visible, runId: state.runId, attempts: 0 });
   if (state.tileQueue.size > MAX_TILE_QUEUE) pruneTileQueue();
   scheduleTilePump();
   return true;
@@ -47,7 +43,6 @@ function scheduleTilePump() {
 
 function pumpTiles() {
   if (!state.loaded) return;
-  if (zoomTileLoadingPaused || zoomRaf) return;
   if (!dimensionCaps().biomes || !state.showBiomes) {
 
     cancelAllTileRequests();
@@ -91,7 +86,7 @@ function pruneTileQueue() {
 function trimTileQueueToView(range) {
   if (!state.tileQueue.size) return;
   for (const [key, job] of state.tileQueue) {
-    if (!tileJobRelevant(job, TILE_QUEUE_VIEW_MARGIN) || job.runId !== state.runId || job.tileGen !== tileLoadGeneration) {
+    if (!tileJobRelevant(job, TILE_QUEUE_VIEW_MARGIN) || job.runId !== state.runId) {
       state.tileQueue.delete(key);
     }
   }
@@ -114,7 +109,7 @@ function tileJobInRange(job, range, margin = 0) {
 function cancelStaleTileRequests() {
   if (!state.pendingTiles.size) return;
   for (const [key, pending] of state.pendingTiles) {
-    if (pending.runId !== state.runId || pending.tileGen !== tileLoadGeneration || !tileJobRelevant(pending, TILE_PENDING_VIEW_MARGIN)) {
+    if (pending.runId !== state.runId || !tileJobRelevant(pending, TILE_PENDING_VIEW_MARGIN)) {
       pending.request?.cancel?.();
       state.pendingTiles.delete(key);
     }
@@ -134,20 +129,12 @@ function cancelAllTileRequests() {
   state.pendingTiles.clear();
 }
 
-function cancelTransientTileLoading() {
-  tileLoadGeneration++;
-  state.tileQueue.clear();
-  tileBuildQueue.length = 0;
-  cancelAllTileRequests();
-  updateChunkPill();
-}
-
 function dropStaleTileBuilds() {
   if (!tileBuildQueue.length) return;
   let dropped = false;
   for (let i = tileBuildQueue.length - 1; i >= 0; i--) {
     const job = tileBuildQueue[i];
-    if (job.runId !== state.runId || job.tileGen !== tileLoadGeneration || !tileJobRelevant(job, TILE_RESULT_KEEP_MARGIN)) {
+    if (job.runId !== state.runId || !tileJobRelevant(job, TILE_RESULT_KEEP_MARGIN)) {
       tileBuildQueue.splice(i, 1);
       state.pendingTiles.delete(job.key);
       dropped = true;
@@ -175,7 +162,7 @@ function requeueTile(job) {
   const attempts = (job.attempts || 0) + 1;
   const priority = tilePriority(job.lod, job.tx, job.tz, job.visible, attempts);
   const retryAt = performance.now() + TILE_RETRY_BASE_DELAY * Math.pow(1.75, attempts - 1);
-  state.tileQueue.set(key, { lod: job.lod, tx: job.tx, tz: job.tz, priority, visible: job.visible, runId: job.runId, tileGen: tileLoadGeneration, attempts, retryAt });
+  state.tileQueue.set(key, { lod: job.lod, tx: job.tx, tz: job.tz, priority, visible: job.visible, runId: job.runId, attempts, retryAt });
   if (state.tileQueue.size > MAX_TILE_QUEUE) pruneTileQueue();
   scheduleTilePumpLater(TILE_RETRY_BASE_DELAY);
 }
@@ -207,14 +194,14 @@ async function loadTile(job) {
       TILE_REQUEST_TIMEOUT,
       "Tile request timed out"
     );
-    if (job.runId !== state.runId || job.tileGen !== tileLoadGeneration || !data.grid) return;
+    if (job.runId !== state.runId || !data.grid) return;
     if (!tileJobRelevant(job, TILE_RESULT_KEEP_MARGIN)) return;
-    tileBuildQueue.push({ key, grid: data.grid, bitmap: data.bitmap, lod: job.lod, tx: job.tx, tz: job.tz, runId: job.runId, tileGen: job.tileGen });
+    tileBuildQueue.push({ key, grid: data.grid, bitmap: data.bitmap, lod: job.lod, tx: job.tx, tz: job.tz, runId: job.runId });
     queued = true;
     scheduleTileBuild();
   } catch (err) {
 
-    if (err?.name !== "AbortError" && job.runId === state.runId && job.tileGen === tileLoadGeneration && (job.attempts || 0) + 1 < MAX_TILE_ATTEMPTS) {
+    if (err?.name !== "AbortError" && job.runId === state.runId && (job.attempts || 0) + 1 < MAX_TILE_ATTEMPTS) {
       retry = true;
     } else {
       if (err?.name !== "AbortError") console.warn("Tile failed", err);
@@ -244,7 +231,7 @@ function buildQueuedTiles() {
   while (tileBuildQueue.length && processed < TILE_BUILD_BATCH && performance.now() < deadline) {
     const job = tileBuildQueue.shift();
     processed++;
-    if (job.runId === state.runId && job.tileGen === tileLoadGeneration && job.grid) {
+    if (job.runId === state.runId && job.grid) {
       state.tiles.set(job.key, createTile(job.grid, job.lod, job.tx, job.tz, job.bitmap));
       built++;
     }
@@ -311,22 +298,18 @@ function createTile(grid, lod, tx, tz, bitmap = null) {
   const c = cnv.getContext("2d", { alpha: false });
   const img = c.createImageData(s, s);
   const data = img.data;
-  const baseX = tx * cfg.blocks;
-  const baseZ = tz * cfg.blocks;
-  const sc = cfg.scale;
-  const allVis = allBiomesVisible();
-  let lx = 0, lz = 0, j = 0;
-  for (let i = 0; i < displayGrid.length; i++, j += 4) {
+  for (let i = 0; i < grid.length; i++) {
+    const lx = i % s;
+    const lz = Math.floor(i / s);
+    const worldX = tx * cfg.blocks + lx * cfg.scale;
+    const worldZ = tz * cfg.blocks + lz * cfg.scale;
     const biomeId = displayGrid[i];
-    if (allVis) {
-      const rgb = BIOME_RGB.get(biomeId) || UNKNOWN_BIOME_RGB;
-      data[j] = rgb[0]; data[j + 1] = rgb[1]; data[j + 2] = rgb[2];
-    } else {
-      const color = biomePixelColor(biomeId, baseX + lx * sc, baseZ + lz * sc);
-      data[j] = (color >> 16) & 255; data[j + 1] = (color >> 8) & 255; data[j + 2] = color & 255;
-    }
+    const color = biomePixelColor(biomeId, worldX, worldZ);
+    const j = i * 4;
+    data[j] = (color >> 16) & 255;
+    data[j + 1] = (color >> 8) & 255;
+    data[j + 2] = color & 255;
     data[j + 3] = 255;
-    if (++lx === s) { lx = 0; lz++; }
   }
   c.putImageData(img, 0, 0);
   return { canvas: cnv, grid, displayGrid, lod, tx, tz, samples: s, scale: cfg.scale, blocks: cfg.blocks, last: performance.now() };
