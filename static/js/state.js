@@ -96,6 +96,8 @@ const state = {
 
 let raf = 0;
 let zoomRaf = 0;
+let zoomTileSettleTimer = 0;
+let zoomTileLoadingPaused = false;
 let momentumRaf = 0;
 let panSample = null;
 let panVel = { x: 0, z: 0 };
@@ -113,6 +115,7 @@ let autoLoadTimer = 0;
 let tileBuildPending = false;
 let tilePumpPending = false;
 let tileRetryPumpTimer = 0;
+let tileLoadGeneration = 0;
 const tileBuildQueue = [];
 const markerImageCache = new Map();
 const labelWidthCache = new Map();

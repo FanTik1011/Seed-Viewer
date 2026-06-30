@@ -66,6 +66,16 @@ function cancelWorldWorkerJobs() {
   }
 }
 
+function decodeBiomeGrid(data) {
+  if (data?.gridEncoding !== "u8-b64" || typeof data.grid !== "string") return data;
+  const raw = atob(data.grid);
+  const grid = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) grid[i] = raw.charCodeAt(i);
+  data.grid = grid;
+  data.gridEncoding = "u8";
+  return data;
+}
+
 async function directRequest(type, payload = {}, signal = undefined) {
   let url = "";
   if (type === "biomeTile") {
@@ -77,7 +87,8 @@ async function directRequest(type, payload = {}, signal = undefined) {
       z: String(payload.z),
       w: String(payload.w),
       h: String(payload.h),
-      scale: String(payload.scale)
+      scale: String(payload.scale),
+      format: "u8"
     });
     url = `${API}/api/biomes?${params}`;
   } else if (type === "structures") {
@@ -141,5 +152,6 @@ async function directRequest(type, payload = {}, signal = undefined) {
   const response = await fetch(url, { signal });
   const data = await response.json();
   if (!response.ok || data.error) throw new Error(data.error || "Request failed");
+  if (type === "biomeTile") decodeBiomeGrid(data);
   return data;
 }
