@@ -10,10 +10,10 @@ const IS_HEROKU = PERF_MODE === "heroku" || /\.herokuapp\.com$/i.test(window.loc
 const MAX_TILE_CACHE = 800;
 const MAX_TILE_QUEUE = 180;
 const MAX_TILE_REQUESTS = IS_HEROKU
-  ? 5
+  ? 4
   : IS_LOCAL_HOST ? Math.max(3, Math.min(6, Math.floor((navigator.hardwareConcurrency || 4) / 2))) : 5;
 const MAX_DRAW_TILES = 300;
-const TILE_REQUEST_TIMEOUT = IS_HEROKU ? 24000 : IS_LOCAL_HOST ? 12000 : 18000;
+const TILE_REQUEST_TIMEOUT = IS_HEROKU ? 30000 : IS_LOCAL_HOST ? 12000 : 18000;
 
 const STRUCT_REQUEST_TIMEOUT = 15000;
 const MAX_TILE_ATTEMPTS = 3;
@@ -66,7 +66,7 @@ const MODERN_LODS = [
   { blocks: 16384, samples: 256, scale: 64 }
 ];
 const HEROKU_MODERN_LODS = [
-  { blocks: 256,   samples: 64,  scale: 4  },
+  { blocks: 512,   samples: 128, scale: 4  },
   { blocks: 1024,  samples: 64,  scale: 16 },
   { blocks: 4096,  samples: 64,  scale: 64 },
   { blocks: 16384, samples: 256, scale: 64 }

@@ -4,7 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SeedMap</title>
-<link rel="stylesheet" href="{{ base_path }}/static/styles.css?v={{ cache_bust }}">
+<link rel="preload" href="{{ base_path }}/static/styles.css?v={{ cache_bust }}" as="style" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="{{ base_path }}/static/styles.css?v={{ cache_bust }}"></noscript>
 </head>
 <body class="finder-hidden">
 <div class="app">
@@ -279,17 +280,17 @@
 window.SEED_VIEWER_BASE_PATH = "{{ base_path }}";
 window.SEED_VIEWER_PERF_MODE = {{ perf_mode|tojson }};
 </script>
-<script src="{{ base_path }}/static/js/config.js?v={{ cache_bust }}"></script>
-<script src="{{ base_path }}/static/js/data.js?v={{ cache_bust }}"></script>
-<script src="{{ base_path }}/static/js/state.js?v={{ cache_bust }}"></script>
-<script src="{{ base_path }}/static/js/worker-api.js?v={{ cache_bust }}"></script>
-<script src="{{ base_path }}/static/js/icons.js?v={{ cache_bust }}"></script>
-<script src="{{ base_path }}/static/js/map-core.js?v={{ cache_bust }}"></script>
-<script src="{{ base_path }}/static/js/map-render.js?v={{ cache_bust }}"></script>
-<script src="{{ base_path }}/static/js/tile-stream.js?v={{ cache_bust }}"></script>
-<script src="{{ base_path }}/static/js/locations.js?v={{ cache_bust }}"></script>
-<script src="{{ base_path }}/static/js/world.js?v={{ cache_bust }}"></script>
-<script src="{{ base_path }}/static/js/ui.js?v={{ cache_bust }}"></script>
-<script src="{{ base_path }}/static/js/boot.js?v={{ cache_bust }}"></script>
+<script defer src="{{ base_path }}/static/js/config.js?v={{ cache_bust }}"></script>
+<script defer src="{{ base_path }}/static/js/data.js?v={{ cache_bust }}"></script>
+<script defer src="{{ base_path }}/static/js/state.js?v={{ cache_bust }}"></script>
+<script defer src="{{ base_path }}/static/js/worker-api.js?v={{ cache_bust }}"></script>
+<script defer src="{{ base_path }}/static/js/icons.js?v={{ cache_bust }}"></script>
+<script defer src="{{ base_path }}/static/js/map-core.js?v={{ cache_bust }}"></script>
+<script defer src="{{ base_path }}/static/js/map-render.js?v={{ cache_bust }}"></script>
+<script defer src="{{ base_path }}/static/js/tile-stream.js?v={{ cache_bust }}"></script>
+<script defer src="{{ base_path }}/static/js/locations.js?v={{ cache_bust }}"></script>
+<script defer src="{{ base_path }}/static/js/world.js?v={{ cache_bust }}"></script>
+<script defer src="{{ base_path }}/static/js/ui.js?v={{ cache_bust }}"></script>
+<script defer src="{{ base_path }}/static/js/boot.js?v={{ cache_bust }}"></script>
 </body>
 </html>
