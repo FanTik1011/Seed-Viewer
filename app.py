@@ -10,6 +10,7 @@ import logging
 import math
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
+from threading import RLock
 
 logging.basicConfig(
     level=logging.INFO,
@@ -294,13 +295,14 @@ MAX_STRUCT_W    = 32768
 MAX_STRUCT_H    = 32768
 MAX_STRONGHOLDS = 128
 MAX_STRUCTURES  = 512
-MAX_STRUCTURE_WORKERS = max(4, min(8, os.cpu_count() or 4))
+MAX_STRUCTURE_WORKERS = max(2, min(4, (os.cpu_count() or 4) // 2))
 MAX_SEARCH_ATTEMPTS = 250
 MAX_SEARCH_RESULTS  = 24
 MAX_SEARCH_RADIUS   = 6000
 MAX_BIOME_FIND_SAMPLES = 65000
 OVERWORLD_BIOME_SCALES = {1, 4, 16, 64, 256}
 DIMENSION_BIOME_SCALES = {1, 4, 16, 64}
+BIOME_LOCK = RLock()
 
 def seed_to_int(seed_str: str) -> int:
     s = seed_str.strip()
@@ -880,21 +882,22 @@ def _biome_grid_cached(seed: int, mc: int, dim_id: int,
         raise RuntimeError(f"Unsupported biome scale: {scale}. Valid scales: {sorted(allowed_scales)}")
     n = w * h
     try:
-        ptr = None
-        if dim_id == 0:
-            ptr = lib.get_biome_grid(seed, mc, x, z, w, h, scale)
-        else:
-            ptr = lib.get_biome_grid_dim(seed, mc, dim_id, x, z, w, h, scale)
-        if not ptr:
-            raise RuntimeError("Biome generation failed")
-        try:
-            values = ptr[:n]
+        with BIOME_LOCK:
+            ptr = None
+            if dim_id == 0:
+                ptr = lib.get_biome_grid(seed, mc, x, z, w, h, scale)
+            else:
+                ptr = lib.get_biome_grid_dim(seed, mc, dim_id, x, z, w, h, scale)
+            if not ptr:
+                raise RuntimeError("Biome generation failed")
             try:
-                grid = bytes(values)
-            except ValueError:
-                grid = tuple(values)
-        finally:
-            lib.free_array(ptr)
+                values = ptr[:n]
+                try:
+                    grid = bytes(values)
+                except ValueError:
+                    grid = tuple(values)
+            finally:
+                lib.free_array(ptr)
     except RuntimeError:
         raise
     except Exception as exc:
