@@ -9,7 +9,6 @@ import logging
 import math
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
-from threading import RLock
 
 logging.basicConfig(
     level=logging.INFO,
@@ -286,7 +285,6 @@ MAX_SEARCH_RADIUS   = 6000
 MAX_BIOME_FIND_SAMPLES = 65000
 OVERWORLD_BIOME_SCALES = {1, 4, 16, 64, 256}
 DIMENSION_BIOME_SCALES = {1, 4, 16, 64}
-BIOME_LOCK = RLock()
 
 def seed_to_int(seed_str: str) -> int:
     s = seed_str.strip()
@@ -860,33 +858,19 @@ def _parse_biome_ids(raw: str) -> list[int]:
 
 @lru_cache(maxsize=4096)
 def _biome_grid_cached(seed: int, mc: int, dim_id: int,
-                       x: int, z: int, w: int, h: int, scale: int) -> bytes | tuple:
+                       x: int, z: int, w: int, h: int, scale: int) -> tuple:
     allowed_scales = _allowed_biome_scales(dim_id)
     if scale not in allowed_scales:
         raise RuntimeError(f"Unsupported biome scale: {scale}. Valid scales: {sorted(allowed_scales)}")
+    if dim_id == 0:
+        ptr = ctypes_call(lib.get_biome_grid, seed, mc, x, z, w, h, scale)
+    else:
+        ptr = ctypes_call(lib.get_biome_grid_dim, seed, mc, dim_id, x, z, w, h, scale)
+    if not ptr:
+        raise RuntimeError("Biome generation failed")
     n = w * h
-    try:
-        with BIOME_LOCK:
-            ptr = None
-            if dim_id == 0:
-                ptr = lib.get_biome_grid(seed, mc, x, z, w, h, scale)
-            else:
-                ptr = lib.get_biome_grid_dim(seed, mc, dim_id, x, z, w, h, scale)
-            if not ptr:
-                raise RuntimeError("Biome generation failed")
-            try:
-                values = ptr[:n]
-                try:
-                    grid = bytes(values)
-                except ValueError:
-                    grid = tuple(values)
-            finally:
-                lib.free_array(ptr)
-    except RuntimeError:
-        raise
-    except Exception as exc:
-        log.error("Biome grid generation failed: %s", exc, exc_info=True)
-        raise RuntimeError("Biome generation failed") from exc
+    grid = tuple(ptr[:n])
+    lib.free_array(ptr)
     return grid
 
 
@@ -973,14 +957,12 @@ def biomes():
     except RuntimeError as e:
         return error(str(e), 500)
 
-    if request.args.get("format") == "u8" and (
-        isinstance(grid, (bytes, bytearray)) or all(0 <= value <= 255 for value in grid)
-    ):
+    if request.args.get("format") == "u8" and all(0 <= value <= 255 for value in grid):
         payload = {
             "seed": seed_str, "version": version, "dimension": dimension,
             "x": x, "z": z, "w": w, "h": h, "scale": scale,
             "gridEncoding": "u8-b64",
-            "grid": base64.b64encode(grid if isinstance(grid, (bytes, bytearray)) else bytes(grid)).decode("ascii"),
+            "grid": base64.b64encode(bytes(grid)).decode("ascii"),
         }
     else:
         payload = {
