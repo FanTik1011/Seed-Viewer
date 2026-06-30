@@ -8,9 +8,9 @@ const IS_LOCAL_HOST = /^(localhost|127\.0\.0\.1|\[?::1\]?)$/.test(window.locatio
 const PERF_MODE = String(window.SEED_VIEWER_PERF_MODE || "").toLowerCase();
 const IS_HEROKU = PERF_MODE === "heroku" || /\.herokuapp\.com$/i.test(window.location.hostname);
 const MAX_TILE_CACHE = 800;
-const MAX_TILE_QUEUE = IS_HEROKU ? 120 : 180;
+const MAX_TILE_QUEUE = 180;
 const MAX_TILE_REQUESTS = IS_HEROKU
-  ? 2
+  ? 4
   : IS_LOCAL_HOST ? Math.max(3, Math.min(6, Math.floor((navigator.hardwareConcurrency || 4) / 2))) : 5;
 const MAX_DRAW_TILES = 300;
 const TILE_REQUEST_TIMEOUT = IS_HEROKU ? 30000 : IS_LOCAL_HOST ? 12000 : 18000;
@@ -20,8 +20,8 @@ const MAX_TILE_ATTEMPTS = 3;
 const TILE_RETRY_PENALTY = 5500;
 const TILE_RETRY_BASE_DELAY = IS_LOCAL_HOST ? 450 : 500;
 const PREFETCH_MARGIN = 0;
-const MAX_TILE_ENQUEUE_PER_RENDER = IS_HEROKU ? 18 : IS_LOCAL_HOST ? 60 : 36;
-const MAX_TILE_QUEUE_WHILE_LOADING = IS_HEROKU ? 70 : IS_LOCAL_HOST ? 180 : 130;
+const MAX_TILE_ENQUEUE_PER_RENDER = IS_LOCAL_HOST ? 60 : 36;
+const MAX_TILE_QUEUE_WHILE_LOADING = IS_LOCAL_HOST ? 180 : 130;
 const TILE_VIEW_MARGIN = 0;
 const TILE_QUEUE_VIEW_MARGIN = 1;
 const TILE_RESULT_KEEP_MARGIN = 1;

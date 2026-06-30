@@ -286,7 +286,7 @@ MAX_SEARCH_RADIUS   = 6000
 MAX_BIOME_FIND_SAMPLES = 65000
 OVERWORLD_BIOME_SCALES = {1, 4, 16, 64, 256}
 DIMENSION_BIOME_SCALES = {1, 4, 16, 64}
-NATIVE_LOCK = RLock()
+BIOME_LOCK = RLock()
 
 def seed_to_int(seed_str: str) -> int:
     s = seed_str.strip()
@@ -340,8 +340,7 @@ def _int_arg(name: str, default: int, lo: int | None = None, hi: int | None = No
 
 def ctypes_call(fn, *args):
     try:
-        with NATIVE_LOCK:
-            return fn(*args)
+        return fn(*args)
     except Exception as exc:
         log.error("ctypes call failed: %s", exc, exc_info=True)
         raise RuntimeError("Native library call failed") from exc
@@ -867,7 +866,7 @@ def _biome_grid_cached(seed: int, mc: int, dim_id: int,
         raise RuntimeError(f"Unsupported biome scale: {scale}. Valid scales: {sorted(allowed_scales)}")
     n = w * h
     try:
-        with NATIVE_LOCK:
+        with BIOME_LOCK:
             ptr = None
             if dim_id == 0:
                 ptr = lib.get_biome_grid(seed, mc, x, z, w, h, scale)
