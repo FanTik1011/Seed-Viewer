@@ -5081,3 +5081,76 @@
     border-color: rgba(134,129,190,.22) !important;
     border-radius: 7px !important;
   }
+
+  /* ── Responsive: narrow screens ─────────────────────────── */
+
+  /* 1180px: finder fits but reduce width */
+  @media (max-width: 1180px) {
+    .finder-drawer {
+      width: 280px !important;
+    }
+  }
+
+  /* 1020px: map gets very tight — hide finder by default, only tab visible */
+  @media (max-width: 1020px) {
+    .finder-drawer {
+      width: 100% !important;
+      right: 0 !important;
+      bottom: 0 !important;
+      top: auto !important;
+      height: min(75vh, 640px) !important;
+      border-radius: 12px 12px 0 0 !important;
+      border-left: 0 !important;
+      border-right: 0 !important;
+      border-bottom: 0 !important;
+    }
+    .finder-drawer.is-hidden {
+      transform: translateY(110%) !important;
+    }
+    .finder-tab {
+      top: auto !important;
+      bottom: 14px !important;
+      right: 14px !important;
+      width: auto !important;
+    }
+    .finder-drawer:not(.is-hidden) ~ .finder-tab {
+      transform: translateY(180%) !important;
+      opacity: 0 !important;
+      pointer-events: none !important;
+    }
+    .layout::after {
+      display: none !important;
+    }
+  }
+
+  /* 700px: left sidebar collapsed — only show toggle, map takes full screen */
+  @media (max-width: 700px) {
+    .layout::before {
+      display: none !important;
+    }
+    .sidebar {
+      left: 0 !important;
+      top: auto !important;
+      bottom: 0 !important;
+      width: 100% !important;
+      max-height: 60vh !important;
+      border-radius: 12px 12px 0 0 !important;
+      background: rgba(24,23,41,.97) !important;
+      box-shadow: 0 -4px 24px rgba(0,0,0,.5) !important;
+      z-index: 30 !important;
+      padding: 8px !important;
+      overflow: auto !important;
+    }
+    .sidebar.is-collapsed {
+      transform: translateY(calc(100% - 44px)) !important;
+    }
+    .topbar {
+      left: 8px !important;
+      top: 8px !important;
+      width: calc(100vw - 16px) !important;
+    }
+    .map-panel {
+      top: 8px !important;
+      right: 8px !important;
+    }
+  }

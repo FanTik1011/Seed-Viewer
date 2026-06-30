@@ -19,7 +19,6 @@ function render() {
   cancelStaleTileRequests();
   dropStaleTileBuilds();
   if (detailedBiomes) {
-    queueCoarseFallbacks(range);
     drawBiomes(range);
     drawHighlightedBiome(range);
     prefetchAround(range);
@@ -27,7 +26,7 @@ function render() {
   } else {
     drawSeedmapLoadingMap(range);
   }
-  if (state.showGrid && gridRange.tilePx >= 12) drawGrid(gridRange);
+  if (state.showGrid && gridRange.tilePx >= 24) drawGrid(gridRange);
   if (state.showAxes) drawAxes();
   drawSelection();
   drawStructures();
@@ -64,7 +63,7 @@ function queueCoarseFallbacks(range) {
   const tzMax = Math.floor(endZ / cfg.blocks);
   for (let tz = tzMin; tz <= tzMax; tz++) {
     for (let tx = txMin; tx <= txMax; tx++) {
-      queueTile(lod, tx, tz, true);
+      queueTile(lod, tx, tz, false);
     }
   }
 }
@@ -74,7 +73,7 @@ function mapIsMoving() {
   return !!((dragStart && pointerMoved) || momentumRaf || zoomRaf);
 }
 
-function drawFallbackTile(fineLod, tx, tz, pos, tilePx) {
+function drawFallbackTile(fineLod, tx, tz, px, pz, pxSize) {
   const fine = LODS[fineLod];
   const wx = tx * fine.blocks;
   const wz = tz * fine.blocks;
@@ -87,7 +86,7 @@ function drawFallbackTile(fineLod, tx, tz, pos, tilePx) {
     const sx = (wx - ctx2 * c.blocks) / c.scale;
     const sy = (wz - ctz * c.blocks) / c.scale;
     const sSize = fine.blocks / c.scale;
-    ctx.drawImage(tile.canvas, sx, sy, sSize, sSize, pos.x, pos.y, tilePx + 1, tilePx + 1);
+    ctx.drawImage(tile.canvas, sx, sy, sSize, sSize, px, pz, pxSize, pxSize);
     tile.last = performance.now();
     return true;
   }
@@ -104,17 +103,22 @@ function drawBiomes(range, queueVisible = true) {
       const { tx, tz } = item;
       const key = tileKey(range.lod, tx, tz);
       const pos = worldToScreen(tx * cfg.blocks, tz * cfg.blocks);
+      const px = Math.round(pos.x);
+      const pz = Math.round(pos.y);
+      const pxSize = Math.round(pos.x + tilePx) - px + 1;
       const tile = state.tiles.get(key);
-      if (state.showBiomes && tile) {
-        tile.last = performance.now();
-        ctx.drawImage(tile.canvas, pos.x, pos.y, tilePx + 1, tilePx + 1);
-      } else if (state.showBiomes && drawFallbackTile(range.lod, tx, tz, pos, tilePx)) {
-
-      } else {
-        drawPendingTile(pos, tilePx, item.dist);
-      }
+      // Queue before the fallback decision so `loading` reflects the current frame
       if (queueVisible && state.showBiomes && !tile && queuedThisFrame < queueBudget) {
         if (queueTile(range.lod, tx, tz, true)) queuedThisFrame++;
+      }
+      const loading = !tile && (state.tileQueue.has(key) || state.pendingTiles.has(key));
+      if (state.showBiomes && tile) {
+        tile.last = performance.now();
+        ctx.drawImage(tile.canvas, px, pz, pxSize, pxSize);
+      } else if (state.showBiomes && !loading && drawFallbackTile(range.lod, tx, tz, px, pz, pxSize)) {
+        // coarse LOD only when tile has genuinely given up (not in queue or pending)
+      } else {
+        drawPendingTile(pos, tilePx, item.dist);
       }
   }
   if (queuedThisFrame >= queueBudget && queueBudget > 0) requestRender();
@@ -238,7 +242,7 @@ function drawGrid(range) {
   const tilePx = TILE_BLOCKS / state.zoom;
   if (tilePx < 18) return;
   ctx.lineWidth = 1;
-  ctx.strokeStyle = tilePx > 80 ? "rgba(6,18,22,.30)" : "rgba(6,18,22,.20)";
+  ctx.strokeStyle = tilePx > 80 ? "rgba(6,18,22,.18)" : "rgba(6,18,22,.11)";
   for (let tx = range.txMin; tx <= range.txMax + 1; tx++) {
     const x = worldToScreen(tx * TILE_BLOCKS, 0).x;
     ctx.beginPath();

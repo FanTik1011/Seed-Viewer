@@ -281,6 +281,8 @@ MAX_SEARCH_ATTEMPTS = 250
 MAX_SEARCH_RESULTS  = 24
 MAX_SEARCH_RADIUS   = 6000
 MAX_BIOME_FIND_SAMPLES = 65000
+OVERWORLD_BIOME_SCALES = {1, 4, 16, 64, 256}
+DIMENSION_BIOME_SCALES = {1, 4, 16, 64}
 
 def seed_to_int(seed_str: str) -> int:
     s = seed_str.strip()
@@ -347,6 +349,10 @@ def error(msg: str, code: int = 400):
 def _dimension_arg() -> str:
     dimension = request.args.get("dimension", "overworld").strip().lower()
     return dimension if dimension in DIM_IDS else "overworld"
+
+
+def _allowed_biome_scales(dim_id: int) -> set[int]:
+    return OVERWORLD_BIOME_SCALES if dim_id == DIM_IDS["overworld"] else DIMENSION_BIOME_SCALES
 
 
 def _available_structures(version: str, dimension: str = "overworld") -> list[str]:
@@ -799,8 +805,9 @@ def _find_nearest_biome_points(seed: int, mc: int, dim_id: int, biome_id: int,
     sample_h = sample_w
     total = sample_w * sample_h
     if total > MAX_BIOME_FIND_SAMPLES:
-        step = max(step, math.ceil((radius * 2) / math.sqrt(MAX_BIOME_FIND_SAMPLES)))
-        step = int(math.ceil(step / 16) * 16)
+        min_step = max(step, math.ceil((radius * 2) / math.sqrt(MAX_BIOME_FIND_SAMPLES)))
+        allowed_scales = sorted(_allowed_biome_scales(dim_id))
+        step = next((scale for scale in allowed_scales if scale >= min_step), allowed_scales[-1])
         sample_w = math.floor((radius * 2) / step) + 1
         sample_h = sample_w
 
@@ -850,6 +857,9 @@ def _parse_biome_ids(raw: str) -> list[int]:
 @lru_cache(maxsize=4096)
 def _biome_grid_cached(seed: int, mc: int, dim_id: int,
                        x: int, z: int, w: int, h: int, scale: int) -> tuple:
+    allowed_scales = _allowed_biome_scales(dim_id)
+    if scale not in allowed_scales:
+        raise RuntimeError(f"Unsupported biome scale: {scale}. Valid scales: {sorted(allowed_scales)}")
     if dim_id == 0:
         ptr = ctypes_call(lib.get_biome_grid, seed, mc, x, z, w, h, scale)
     else:
@@ -926,13 +936,17 @@ def biomes():
     z     = _int_arg('z', -1024)
     w     = _int_arg('w', 64,  lo=1, hi=MAX_BIOME_W)
     h     = _int_arg('h', 64,  lo=1, hi=MAX_BIOME_H)
-    scale = _int_arg('scale', 16, lo=4, hi=64)
+    scale = _int_arg('scale', 16, lo=4, hi=256)
+    dim_id = DIM_IDS[dimension]
+    allowed_scales = _allowed_biome_scales(dim_id)
+    if scale not in allowed_scales:
+        return error(f"Unsupported biome scale: {scale}. Valid scales: {sorted(allowed_scales)}")
 
     mc   = MC_VERSIONS[version]
     seed = seed_for_version(seed_str, version)
 
     try:
-        grid = list(_biome_grid_cached(seed, mc, DIM_IDS[dimension], x, z, w, h, scale))
+        grid = list(_biome_grid_cached(seed, mc, dim_id, x, z, w, h, scale))
     except RuntimeError as e:
         return error(str(e), 500)
 
@@ -961,6 +975,10 @@ def find_biome():
     step = _int_arg('step', 64, lo=16, hi=256)
     limit = _int_arg('limit', 8, lo=1, hi=MAX_SEARCH_RESULTS)
     origin_mode = request.args.get('origin', 'spawn')
+    dim_id = DIM_IDS[dimension]
+    allowed_scales = _allowed_biome_scales(dim_id)
+    if step not in allowed_scales:
+        return error(f"Unsupported biome search step: {step}. Valid steps: {sorted(allowed_scales)}")
 
     mc = MC_VERSIONS[version]
     seed = seed_for_version(seed_str, version)
@@ -978,7 +996,7 @@ def find_biome():
 
     try:
         results, checked, used_step = _find_nearest_biome_points(
-            seed, mc, DIM_IDS[dimension], biome_id, origin, radius, step, limit
+            seed, mc, dim_id, biome_id, origin, radius, step, limit
         )
     except RuntimeError as e:
         return error(str(e), 500)

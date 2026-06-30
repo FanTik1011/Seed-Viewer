@@ -247,13 +247,51 @@ function buildQueuedTiles() {
   if (tileBuildQueue.length) scheduleTileBuild();
 }
 
+// Biomes that appear as diagonal noise stripes at water/land boundaries
+const STRIPE_BIOMES = new Set([
+  2, 17,                         // Desert, Desert Hills
+  35, 36, 163, 164,              // Savanna, Savanna Plateau, Shattered Savanna variants
+  37, 38, 39, 165, 166, 167,     // Badlands and all variants
+]);
+// Water biomes — only replace stripe pixels when fully surrounded by these
+const WATER_BIOMES = new Set([
+  0, 7, 10, 11, 24,              // Ocean, River, Frozen Ocean, Frozen River, Deep Ocean
+  40, 41, 42, 43,                // End biomes (not water but irrelevant context)
+  44, 45, 46, 47, 48, 49, 50,   // Warm/Lukewarm/Cold/Deep Ocean variants
+]);
+
+function smoothBiomeGrid(grid, s) {
+  if (!grid || grid.length !== s * s) return grid;
+  let changed = false;
+  const result = Array.from(grid);
+  for (let z = 1; z < s - 1; z++) {
+    for (let x = 1; x < s - 1; x++) {
+      const i = z * s + x;
+      const c = grid[i];
+      if (!STRIPE_BIOMES.has(c)) continue;
+      const n = grid[(z - 1) * s + x];
+      if (!WATER_BIOMES.has(n)) continue;
+      const sn = grid[(z + 1) * s + x];
+      if (n !== sn) continue;
+      const w = grid[z * s + x - 1];
+      if (n !== w) continue;
+      const e = grid[z * s + x + 1];
+      if (n !== e) continue;
+      result[i] = n;
+      changed = true;
+    }
+  }
+  return changed ? result : grid;
+}
+
 function createTile(grid, lod, tx, tz, bitmap = null) {
   const cfg = LODS[lod];
   const s = cfg.samples;
-  const displayGrid = surfaceBiomeGrid(grid, s);
+  const displayGrid = smoothBiomeGrid(surfaceBiomeGrid(grid, s), s);
   if (bitmap && displayGrid === grid && allBiomesVisible()) {
     return { canvas: bitmap, grid, displayGrid, lod, tx, tz, samples: s, scale: cfg.scale, blocks: cfg.blocks, last: performance.now() };
   }
+  if (bitmap) bitmap.close?.();
   const cnv = document.createElement("canvas");
   cnv.width = s;
   cnv.height = s;

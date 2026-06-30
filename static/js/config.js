@@ -18,8 +18,8 @@ const MAX_TILE_ATTEMPTS = IS_LOCAL_HOST ? 3 : 3;
 const TILE_RETRY_PENALTY = 5500;
 const TILE_RETRY_BASE_DELAY = IS_LOCAL_HOST ? 450 : 500;
 const PREFETCH_MARGIN = 0;
-const MAX_TILE_ENQUEUE_PER_RENDER = IS_LOCAL_HOST ? 10 : 10;
-const MAX_TILE_QUEUE_WHILE_LOADING = IS_LOCAL_HOST ? 36 : 32;
+const MAX_TILE_ENQUEUE_PER_RENDER = IS_LOCAL_HOST ? 40 : 20;
+const MAX_TILE_QUEUE_WHILE_LOADING = IS_LOCAL_HOST ? 120 : 80;
 const TILE_VIEW_MARGIN = 0;
 const TILE_QUEUE_VIEW_MARGIN = 1;
 const TILE_RESULT_KEEP_MARGIN = 1;
@@ -57,8 +57,8 @@ const TILE_BUILD_FRAME_BUDGET = 4;
 const TILE_PENDING_VIEW_MARGIN = IS_LOCAL_HOST ? 2 : 3;
 
 const MODERN_LODS = [
-  { blocks: 256,   samples: 32,  scale: 8  },
-  { blocks: 1024,  samples: 32,  scale: 32 },
+  { blocks: 256,   samples: 64,  scale: 4  },
+  { blocks: 1024,  samples: 64,  scale: 16 },
   { blocks: 4096,  samples: 64,  scale: 64 },
   { blocks: 16384, samples: 256, scale: 64 }
 ];
