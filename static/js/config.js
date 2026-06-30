@@ -7,12 +7,12 @@ const TILE_SAMPLES = TILE_BLOCKS / SAMPLE_SCALE;
 const IS_LOCAL_HOST = /^(localhost|127\.0\.0\.1|\[?::1\]?)$/.test(window.location.hostname);
 const PERF_MODE = String(window.SEED_VIEWER_PERF_MODE || "").toLowerCase();
 const IS_HEROKU = PERF_MODE === "heroku" || /\.herokuapp\.com$/i.test(window.location.hostname);
-const MAX_TILE_CACHE = 650;
-const MAX_TILE_QUEUE = 120;
+const MAX_TILE_CACHE = 800;
+const MAX_TILE_QUEUE = 180;
 const MAX_TILE_REQUESTS = IS_HEROKU
-  ? 4
-  : IS_LOCAL_HOST ? Math.max(2, Math.min(4, Math.floor((navigator.hardwareConcurrency || 4) / 2))) : 4;
-const MAX_DRAW_TILES = 240;
+  ? 5
+  : IS_LOCAL_HOST ? Math.max(3, Math.min(6, Math.floor((navigator.hardwareConcurrency || 4) / 2))) : 5;
+const MAX_DRAW_TILES = 300;
 const TILE_REQUEST_TIMEOUT = IS_HEROKU ? 24000 : IS_LOCAL_HOST ? 12000 : 18000;
 
 const STRUCT_REQUEST_TIMEOUT = 15000;
@@ -20,8 +20,8 @@ const MAX_TILE_ATTEMPTS = 3;
 const TILE_RETRY_PENALTY = 5500;
 const TILE_RETRY_BASE_DELAY = IS_LOCAL_HOST ? 450 : 500;
 const PREFETCH_MARGIN = 0;
-const MAX_TILE_ENQUEUE_PER_RENDER = IS_LOCAL_HOST ? 40 : 20;
-const MAX_TILE_QUEUE_WHILE_LOADING = IS_LOCAL_HOST ? 120 : 80;
+const MAX_TILE_ENQUEUE_PER_RENDER = IS_LOCAL_HOST ? 60 : 36;
+const MAX_TILE_QUEUE_WHILE_LOADING = IS_LOCAL_HOST ? 180 : 130;
 const TILE_VIEW_MARGIN = 0;
 const TILE_QUEUE_VIEW_MARGIN = 1;
 const TILE_RESULT_KEEP_MARGIN = 1;
@@ -54,9 +54,10 @@ const STRUCT_FAST_TYPES = [
 const WORKER_POOL_SIZE = Math.max(1, Math.min(MAX_TILE_REQUESTS, Math.ceil((navigator.hardwareConcurrency || 4) / 3)));
 const VISIBLE_TILE_PRIORITY_BOOST = 1_000_000;
 const COARSE_TILE_PRIORITY_BOOST = 500_000;
-const TILE_BUILD_BATCH = 6;
-const TILE_BUILD_FRAME_BUDGET = 4;
+const TILE_BUILD_BATCH = 8;
+const TILE_BUILD_FRAME_BUDGET = 5;
 const TILE_PENDING_VIEW_MARGIN = IS_LOCAL_HOST ? 2 : 3;
+const ZOOM_TILE_SETTLE_DELAY = IS_HEROKU ? 220 : 140;
 
 const MODERN_LODS = [
   { blocks: 256,   samples: 64,  scale: 4  },

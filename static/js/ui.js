@@ -298,7 +298,6 @@ function bindEvents() {
   document.getElementById("close-popover").addEventListener("click", closeLocationPopover);
   document.getElementById("select-all-features").addEventListener("click", () => setAllFeatures(true));
   document.getElementById("deselect-all-features").addEventListener("click", () => setAllFeatures(false));
-  document.getElementById("select-all-biomes").addEventListener("click", () => setAllBiomes(true));
   document.getElementById("deselect-all-biomes").addEventListener("click", () => setAllBiomes(false));
   els.finderBtn.addEventListener("click", searchMatchingSeeds);
   els.finderRadius.addEventListener("input", () => {
@@ -427,7 +426,7 @@ function parseNumberParam(value) {
 function parseChunkbaseZoom(value) {
   const n = parseNumberParam(value);
   if (!Number.isFinite(n) || n <= 0) return NaN;
-  return clamp(4 / n, MIN_ZOOM, MAX_ZOOM);
+  return clampMapZoom(4 / n);
 }
 
 async function loadCapabilities() {

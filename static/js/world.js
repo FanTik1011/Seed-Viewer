@@ -20,6 +20,9 @@ async function loadWorld(options = {}) {
   resetUiCaches();
   cancelWorldWorkerJobs();
   cancelAllTileRequests();
+  clearTimeout(zoomTileSettleTimer);
+  zoomTileSettleTimer = 0;
+  zoomTileLoadingPaused = false;
   state.tiles.clear();
   state.tileQueue.clear();
   tileBuildQueue.length = 0;
@@ -38,7 +41,7 @@ async function loadWorld(options = {}) {
     state.loaded = true;
     state.viewX = Number.isFinite(options.centerX) ? Math.round(options.centerX) : (data.spawn?.x ?? 0);
     state.viewZ = Number.isFinite(options.centerZ) ? Math.round(options.centerZ) : (data.spawn?.z ?? 0);
-    state.zoom = Number.isFinite(options.zoom) ? clamp(options.zoom, MIN_ZOOM, MAX_ZOOM) : DEFAULT_ZOOM;
+    state.zoom = Number.isFinite(options.zoom) ? clampMapZoom(options.zoom) : clampMapZoom(DEFAULT_ZOOM);
     state.zoomTarget = state.zoom;
     cancelZoomAnim();
     cancelMomentum();
