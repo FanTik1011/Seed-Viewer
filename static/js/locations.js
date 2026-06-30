@@ -534,7 +534,7 @@ function toggleBiome(id) {
     return;
   }
   state.highlightedBiome = state.highlightedBiome === id ? null : id;
-  rebuildBiomeTileCanvases();
+  requestRender();
   buildSidebar();
   showToast(state.highlightedBiome ? `${biomeName(Number(id))} highlighted` : "Biome highlight cleared");
 }

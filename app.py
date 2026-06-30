@@ -137,10 +137,12 @@ JAVA_MC_VERSIONS = {
     "1.20": 25,
     "1.21": 28,
     "26.1": 28,
+    "26.2": 28,
 }
 
 JAVA_VERSION_FALLBACKS = {
     "26.1": "1.21",
+    "26.2": "1.21",
 }
 
 BEDROCK_VERSION_FALLBACKS = {
@@ -250,6 +252,7 @@ _VERSION_EXTRAS = {
     "1.20": {"Ruined_Portal", "Ruined_Portal_Nether", "Geode", "Ancient_City", "Trail_Ruins", "Fortress", "Bastion", "End_City", "End_Gateway", "End_Island"},
     "1.21": {"Ruined_Portal", "Ruined_Portal_Nether", "Geode", "Ancient_City", "Trail_Ruins", "Trial_Chambers", "Fortress", "Bastion", "End_City", "End_Gateway", "End_Island"},
     "26.1": {"Ruined_Portal", "Ruined_Portal_Nether", "Geode", "Ancient_City", "Trail_Ruins", "Trial_Chambers", "Fortress", "Bastion", "End_City", "End_Gateway", "End_Island"},
+    "26.2": {"Ruined_Portal", "Ruined_Portal_Nether", "Geode", "Ancient_City", "Trail_Ruins", "Trial_Chambers", "Fortress", "Bastion", "End_City", "End_Gateway", "End_Island"},
 }
 
 
@@ -859,9 +862,12 @@ def _biome_grid_cached(seed: int, mc: int, dim_id: int,
     return grid
 
 
+import time as _time
+_CACHE_BUST = str(int(_time.time()))
+
 @app.route('/')
 def index():
-    return render_template('index.html', base_path=PUBLIC_BASE_PATH)
+    return render_template('index.html', base_path=PUBLIC_BASE_PATH, cache_bust=_CACHE_BUST)
 
 
 @app.route('/api/versions')

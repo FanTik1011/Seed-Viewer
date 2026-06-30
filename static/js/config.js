@@ -79,9 +79,10 @@ const MANUAL_SCAN_RADIUS = 3072;
 const MAP_BG = "#17158b";
 const EMPTY_TILE_COLORS = ["#17158b", "#17158b"];
 const UNKNOWN_BIOME_RGB = [38, 45, 41];
-const CAVE_BIOME_IDS = new Set([174, 175, 183]);
+const CAVE_BIOME_IDS = new Set([174, 175, 183, 187]);
 const SURFACE_BIOME_FALLBACK = 1;
 const JAVA_VERSION_FALLBACKS = {
+  "26.2": "1.21",
   "26.1": "1.21"
 };
 const BEDROCK_VERSION_FALLBACKS = {

@@ -51,7 +51,7 @@ const BIOME_COLORS = {
   165:"#c96b37",166:"#ad5728",167:"#9d3d1d",168:"#38b83a",169:"#27942c",170:"#68431d",
   171:"#9c2d2d",172:"#236b69",173:"#484958",174:"#58804b",175:"#33a06d",177:"#70ac4a",
   178:"#5f9c5d",179:"#dbe3e5",180:"#c9d5df",181:"#bac8d3",182:"#899987",183:"#24243b",
-  184:"#347e5b",185:"#f2a9bd",186:"#d6dde0"
+  184:"#347e5b",185:"#f2a9bd",186:"#d6dde0",187:"#c8a820"
 };
 
 Object.assign(BIOME_COLORS, {
@@ -72,7 +72,7 @@ Object.assign(BIOME_COLORS, {
   169:"#3B470A",170:"#5E3830",171:"#DD0808",172:"#49907B",173:"#403636",
   174:"#507050",175:"#59C93C",177:"#60A445",178:"#47783E",179:"#FFFFFF",
   180:"#B0B0B0",181:"#D8D8D8",182:"#A2A284",183:"#303050",184:"#2F6F50",
-  185:"#F7B2C4",186:"#C9D6C9"
+  185:"#F7B2C4",186:"#C9D6C9",187:"#D4A017"
 });
 
 function hexToRgb(hex) {
@@ -106,7 +106,7 @@ const BIOME_NAMES = {
   170:"Soul Sand Valley",171:"Crimson Forest",172:"Warped Forest",173:"Basalt Deltas",
   174:"Dripstone Caves",175:"Lush Caves",177:"Meadow",178:"Grove",179:"Snowy Slopes",
   180:"Jagged Peaks",181:"Frozen Peaks",182:"Stony Peaks",183:"Deep Dark",
-  184:"Mangrove Swamp",185:"Cherry Grove",186:"Pale Garden"
+  184:"Mangrove Swamp",185:"Cherry Grove",186:"Pale Garden",187:"Sulfur Caves"
 };
 
 const MODERN_BIOME_NAMES = {

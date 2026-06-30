@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SeedMap</title>
-<link rel="stylesheet" href="{{ base_path }}/static/styles.css">
+<link rel="stylesheet" href="{{ base_path }}/static/styles.css?v={{ cache_bust }}">
 </head>
 <body class="finder-hidden">
 <div class="app">
@@ -21,6 +21,7 @@
       <input class="field" id="seed-input" type="text" placeholder="Seed number or text">
       <select class="select" id="version-select" title="Minecraft version">
         <optgroup label="Java Edition">
+          <option value="26.2">Java 26.2</option>
           <option value="26.1">Java 26.1</option>
           <option value="1.21">Java 1.21</option>
           <option value="1.20" selected>Java 1.20</option>
@@ -276,17 +277,17 @@
 </div>
 
 <script>window.SEED_VIEWER_BASE_PATH = "{{ base_path }}";</script>
-<script src="{{ base_path }}/static/js/config.js"></script>
-<script src="{{ base_path }}/static/js/data.js"></script>
-<script src="{{ base_path }}/static/js/state.js"></script>
-<script src="{{ base_path }}/static/js/worker-api.js"></script>
-<script src="{{ base_path }}/static/js/icons.js"></script>
-<script src="{{ base_path }}/static/js/map-core.js"></script>
-<script src="{{ base_path }}/static/js/map-render.js"></script>
-<script src="{{ base_path }}/static/js/tile-stream.js"></script>
-<script src="{{ base_path }}/static/js/locations.js"></script>
-<script src="{{ base_path }}/static/js/world.js"></script>
-<script src="{{ base_path }}/static/js/ui.js"></script>
-<script src="{{ base_path }}/static/js/boot.js"></script>
+<script src="{{ base_path }}/static/js/config.js?v={{ cache_bust }}"></script>
+<script src="{{ base_path }}/static/js/data.js?v={{ cache_bust }}"></script>
+<script src="{{ base_path }}/static/js/state.js?v={{ cache_bust }}"></script>
+<script src="{{ base_path }}/static/js/worker-api.js?v={{ cache_bust }}"></script>
+<script src="{{ base_path }}/static/js/icons.js?v={{ cache_bust }}"></script>
+<script src="{{ base_path }}/static/js/map-core.js?v={{ cache_bust }}"></script>
+<script src="{{ base_path }}/static/js/map-render.js?v={{ cache_bust }}"></script>
+<script src="{{ base_path }}/static/js/tile-stream.js?v={{ cache_bust }}"></script>
+<script src="{{ base_path }}/static/js/locations.js?v={{ cache_bust }}"></script>
+<script src="{{ base_path }}/static/js/world.js?v={{ cache_bust }}"></script>
+<script src="{{ base_path }}/static/js/ui.js?v={{ cache_bust }}"></script>
+<script src="{{ base_path }}/static/js/boot.js?v={{ cache_bust }}"></script>
 </body>
 </html>

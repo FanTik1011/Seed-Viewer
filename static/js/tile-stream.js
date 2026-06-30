@@ -60,6 +60,7 @@ function pumpTiles() {
     if (next.retryAt && next.retryAt > now) continue;
     state.tileQueue.delete(tileKey(next.lod, next.tx, next.tz));
     loadTile(next);
+    updateChunkPill();
   }
   if (state.pendingTiles.size < MAX_TILE_REQUESTS && [...state.tileQueue.values()].some(job => job.retryAt && job.retryAt > now)) {
     scheduleTilePumpLater();
@@ -130,13 +131,16 @@ function cancelAllTileRequests() {
 
 function dropStaleTileBuilds() {
   if (!tileBuildQueue.length) return;
+  let dropped = false;
   for (let i = tileBuildQueue.length - 1; i >= 0; i--) {
     const job = tileBuildQueue[i];
     if (job.runId !== state.runId || !tileJobRelevant(job, TILE_RESULT_KEEP_MARGIN)) {
       tileBuildQueue.splice(i, 1);
       state.pendingTiles.delete(job.key);
+      dropped = true;
     }
   }
+  if (dropped) updateChunkPill();
 }
 
 function withTimeout(promise, ms, message = "Request timed out") {
@@ -247,7 +251,7 @@ function createTile(grid, lod, tx, tz, bitmap = null) {
   const cfg = LODS[lod];
   const s = cfg.samples;
   const displayGrid = surfaceBiomeGrid(grid, s);
-  if (bitmap && displayGrid === grid && allBiomesVisible() && state.highlightedBiome == null) {
+  if (bitmap && displayGrid === grid && allBiomesVisible()) {
     return { canvas: bitmap, grid, displayGrid, lod, tx, tz, samples: s, scale: cfg.scale, blocks: cfg.blocks, last: performance.now() };
   }
   const cnv = document.createElement("canvas");
@@ -308,9 +312,7 @@ function allBiomesVisible() {
 function biomePixelColor(biomeId, worldX, worldZ) {
   const rgb = BIOME_RGB.get(biomeId) || UNKNOWN_BIOME_RGB;
   if (state.biomeVis[String(biomeId)] !== false) {
-    const base = tintBiome(rgb, worldX >> 4, worldZ >> 4, biomeId);
-    if (state.highlightedBiome == null) return base;
-    return highlightedBiomeColor(base, biomeId, worldX, worldZ);
+    return tintBiome(rgb, worldX, worldZ, biomeId);
   }
   const shade = 20 + ((Math.abs((worldX >> 5) + (worldZ >> 5)) % 2) * 7);
   return (shade << 16) | ((shade + 4) << 8) | (shade + 8);
@@ -326,8 +328,7 @@ function rebuildBiomeTileCanvases() {
   requestRender();
 }
 
-function tintBiome(rgb, x, z, biomeId) {
-
+function tintBiome(rgb, worldX, worldZ, biomeId) {
   return (rgb[0] << 16) | (rgb[1] << 8) | rgb[2];
 }
 
@@ -335,10 +336,9 @@ function highlightedBiomeColor(color, biomeId, worldX, worldZ) {
   if (isCaveBiomeId(state.highlightedBiome)) return color;
   const selected = String(biomeId) === String(state.highlightedBiome);
   if (!selected) {
-    return mixPackedColor(color, 0x10151a, 0.2);
+    return mixPackedColor(color, 0x0a0e12, 0.22);
   }
-  const shimmer = ((worldX >> 4) + (worldZ >> 4)) % 6 === 0 ? 0.18 : 0;
-  return mixPackedColor(color, 0xf5ffdf, 0.12 + shimmer * 0.5);
+  return mixPackedColor(color, 0xf8ffe8, 0.16);
 }
 
 function mixPackedColor(a, b, t) {
