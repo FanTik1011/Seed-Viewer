@@ -1,6 +1,5 @@
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
-from flask_compress import Compress
 import base64
 import ctypes
 import os
@@ -44,21 +43,6 @@ class PrefixMiddleware:
 
 app = Flask(__name__, static_folder='static', template_folder='templates')
 CORS(app, origins=["http://localhost:*", "http://127.0.0.1:*"])
-
-app.config["COMPRESS_ALGORITHM"] = ["br", "gzip"]
-app.config["COMPRESS_MIN_SIZE"] = 512
-app.config["COMPRESS_LEVEL"] = 6
-Compress(app)
-
-ONE_YEAR = 31_536_000
-
-@app.after_request
-def add_static_cache_headers(response):
-    path = request.path
-    if path.startswith("/static/"):
-        response.headers["Cache-Control"] = f"public, max-age={ONE_YEAR}, immutable"
-    return response
-
 if PUBLIC_BASE_PATH:
     app.wsgi_app = PrefixMiddleware(app.wsgi_app, PUBLIC_BASE_PATH)
 
