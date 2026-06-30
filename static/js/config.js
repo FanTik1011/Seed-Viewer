@@ -10,18 +10,18 @@ const IS_HEROKU = PERF_MODE === "heroku" || /\.herokuapp\.com$/i.test(window.loc
 const MAX_TILE_CACHE = 800;
 const MAX_TILE_QUEUE = 180;
 const MAX_TILE_REQUESTS = IS_HEROKU
-  ? 4
+  ? 6
   : IS_LOCAL_HOST ? Math.max(3, Math.min(6, Math.floor((navigator.hardwareConcurrency || 4) / 2))) : 5;
 const MAX_DRAW_TILES = 300;
-const TILE_REQUEST_TIMEOUT = IS_HEROKU ? 30000 : IS_LOCAL_HOST ? 12000 : 18000;
+const TILE_REQUEST_TIMEOUT = IS_HEROKU ? 20000 : IS_LOCAL_HOST ? 12000 : 18000;
 
 const STRUCT_REQUEST_TIMEOUT = 15000;
 const MAX_TILE_ATTEMPTS = 3;
 const TILE_RETRY_PENALTY = 5500;
-const TILE_RETRY_BASE_DELAY = IS_LOCAL_HOST ? 450 : 500;
+const TILE_RETRY_BASE_DELAY = IS_LOCAL_HOST ? 450 : 400;
 const PREFETCH_MARGIN = 0;
-const MAX_TILE_ENQUEUE_PER_RENDER = IS_LOCAL_HOST ? 60 : 36;
-const MAX_TILE_QUEUE_WHILE_LOADING = IS_LOCAL_HOST ? 180 : 130;
+const MAX_TILE_ENQUEUE_PER_RENDER = IS_LOCAL_HOST ? 60 : IS_HEROKU ? 48 : 36;
+const MAX_TILE_QUEUE_WHILE_LOADING = IS_LOCAL_HOST ? 180 : IS_HEROKU ? 160 : 130;
 const TILE_VIEW_MARGIN = 0;
 const TILE_QUEUE_VIEW_MARGIN = 1;
 const TILE_RESULT_KEEP_MARGIN = 1;
@@ -57,7 +57,7 @@ const COARSE_TILE_PRIORITY_BOOST = 500_000;
 const TILE_BUILD_BATCH = 8;
 const TILE_BUILD_FRAME_BUDGET = 5;
 const TILE_PENDING_VIEW_MARGIN = IS_LOCAL_HOST ? 2 : 3;
-const ZOOM_TILE_SETTLE_DELAY = IS_HEROKU ? 220 : 140;
+const ZOOM_TILE_SETTLE_DELAY = IS_HEROKU ? 120 : 140;
 
 const MODERN_LODS = [
   { blocks: 256,   samples: 64,  scale: 4  },
@@ -66,9 +66,9 @@ const MODERN_LODS = [
   { blocks: 16384, samples: 256, scale: 64 }
 ];
 const HEROKU_MODERN_LODS = [
-  { blocks: 512,   samples: 128, scale: 4  },
-  { blocks: 1024,  samples: 64,  scale: 16 },
-  { blocks: 4096,  samples: 64,  scale: 64 },
+  { blocks: 256,  samples: 64,  scale: 4  },
+  { blocks: 1024, samples: 64,  scale: 16 },
+  { blocks: 4096, samples: 64,  scale: 64 },
   { blocks: 16384, samples: 256, scale: 64 }
 ];
 const LEGACY_LODS = [
