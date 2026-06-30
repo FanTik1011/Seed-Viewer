@@ -298,18 +298,22 @@ function createTile(grid, lod, tx, tz, bitmap = null) {
   const c = cnv.getContext("2d", { alpha: false });
   const img = c.createImageData(s, s);
   const data = img.data;
-  for (let i = 0; i < grid.length; i++) {
-    const lx = i % s;
-    const lz = Math.floor(i / s);
-    const worldX = tx * cfg.blocks + lx * cfg.scale;
-    const worldZ = tz * cfg.blocks + lz * cfg.scale;
+  const baseX = tx * cfg.blocks;
+  const baseZ = tz * cfg.blocks;
+  const sc = cfg.scale;
+  const allVis = allBiomesVisible();
+  let lx = 0, lz = 0, j = 0;
+  for (let i = 0; i < displayGrid.length; i++, j += 4) {
     const biomeId = displayGrid[i];
-    const color = biomePixelColor(biomeId, worldX, worldZ);
-    const j = i * 4;
-    data[j] = (color >> 16) & 255;
-    data[j + 1] = (color >> 8) & 255;
-    data[j + 2] = color & 255;
+    if (allVis) {
+      const rgb = BIOME_RGB.get(biomeId) || UNKNOWN_BIOME_RGB;
+      data[j] = rgb[0]; data[j + 1] = rgb[1]; data[j + 2] = rgb[2];
+    } else {
+      const color = biomePixelColor(biomeId, baseX + lx * sc, baseZ + lz * sc);
+      data[j] = (color >> 16) & 255; data[j + 1] = (color >> 8) & 255; data[j + 2] = color & 255;
+    }
     data[j + 3] = 255;
+    if (++lx === s) { lx = 0; lz++; }
   }
   c.putImageData(img, 0, 0);
   return { canvas: cnv, grid, displayGrid, lod, tx, tz, samples: s, scale: cfg.scale, blocks: cfg.blocks, last: performance.now() };
