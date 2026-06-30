@@ -38,6 +38,16 @@ function tintBiome(rgb, x, z, biomeId) {
   return (rgb[0] << 16) | (rgb[1] << 8) | rgb[2];
 }
 
+function decodeBiomeGrid(data) {
+  if (data?.gridEncoding !== "u8-b64" || typeof data.grid !== "string") return data;
+  const raw = atob(data.grid);
+  const grid = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) grid[i] = raw.charCodeAt(i);
+  data.grid = grid;
+  data.gridEncoding = "u8";
+  return data;
+}
+
 function attachBiomeBitmap(data, payload) {
   if (!data?.grid || typeof OffscreenCanvas === "undefined") return;
   const s = Number(payload.w);
@@ -99,9 +109,11 @@ self.onmessage = async event => {
         z: String(payload.z),
         w: String(payload.w),
         h: String(payload.h),
-        scale: String(payload.scale)
+        scale: String(payload.scale),
+        format: "u8"
       });
       data = await getJson(`/api/biomes?${params}`, controller?.signal);
+      decodeBiomeGrid(data);
       attachBiomeBitmap(data, payload);
     } else if (type === "structures") {
       const params = new URLSearchParams({

@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
+import base64
 import ctypes
 import os
 import sys
@@ -952,15 +953,25 @@ def biomes():
     seed = seed_for_version(seed_str, version)
 
     try:
-        grid = list(_biome_grid_cached(seed, mc, dim_id, x, z, w, h, scale))
+        grid = _biome_grid_cached(seed, mc, dim_id, x, z, w, h, scale)
     except RuntimeError as e:
         return error(str(e), 500)
 
-    resp = jsonify({
-        "seed": seed_str, "version": version, "dimension": dimension,
-        "x": x, "z": z, "w": w, "h": h, "scale": scale,
-        "grid": grid,
-    })
+    if request.args.get("format") == "u8" and all(0 <= value <= 255 for value in grid):
+        payload = {
+            "seed": seed_str, "version": version, "dimension": dimension,
+            "x": x, "z": z, "w": w, "h": h, "scale": scale,
+            "gridEncoding": "u8-b64",
+            "grid": base64.b64encode(bytes(grid)).decode("ascii"),
+        }
+    else:
+        payload = {
+            "seed": seed_str, "version": version, "dimension": dimension,
+            "x": x, "z": z, "w": w, "h": h, "scale": scale,
+            "grid": list(grid),
+        }
+
+    resp = jsonify(payload)
     resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
     return resp
 

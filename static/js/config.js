@@ -13,7 +13,6 @@ const MAX_TILE_REQUESTS = IS_HEROKU
   ? 4
   : IS_LOCAL_HOST ? Math.max(2, Math.min(4, Math.floor((navigator.hardwareConcurrency || 4) / 2))) : 4;
 const MAX_DRAW_TILES = 240;
-const MIN_FINE_BIOME_TILE_PX = 96;
 const TILE_REQUEST_TIMEOUT = IS_HEROKU ? 24000 : IS_LOCAL_HOST ? 12000 : 18000;
 
 const STRUCT_REQUEST_TIMEOUT = 15000;
@@ -61,14 +60,12 @@ const TILE_PENDING_VIEW_MARGIN = IS_LOCAL_HOST ? 2 : 3;
 
 const MODERN_LODS = [
   { blocks: 256,   samples: 64,  scale: 4  },
-  { blocks: 512,   samples: 32,  scale: 16 },
   { blocks: 1024,  samples: 64,  scale: 16 },
   { blocks: 4096,  samples: 64,  scale: 64 },
   { blocks: 16384, samples: 256, scale: 64 }
 ];
 const HEROKU_MODERN_LODS = [
   { blocks: 256,   samples: 64,  scale: 4  },
-  { blocks: 512,   samples: 32,  scale: 16 },
   { blocks: 1024,  samples: 64,  scale: 16 },
   { blocks: 4096,  samples: 64,  scale: 64 },
   { blocks: 16384, samples: 256, scale: 64 }
