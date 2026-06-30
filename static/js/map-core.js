@@ -241,6 +241,7 @@ function pickLod() {
   const hWorld = state.height * state.zoom;
   for (let i = 0; i < LODS.length - 1; i++) {
     const b = LODS[i].blocks;
+    if (LODS[i].scale <= 4 && b / state.zoom < MIN_FINE_BIOME_TILE_PX) continue;
     const count = (Math.ceil(wWorld / b) + 3) * (Math.ceil(hWorld / b) + 3);
     if (count <= MAX_DRAW_TILES) return i;
   }
