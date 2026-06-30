@@ -860,7 +860,7 @@ def _parse_biome_ids(raw: str) -> list[int]:
 
 @lru_cache(maxsize=4096)
 def _biome_grid_cached(seed: int, mc: int, dim_id: int,
-                       x: int, z: int, w: int, h: int, scale: int) -> tuple:
+                       x: int, z: int, w: int, h: int, scale: int) -> bytes | tuple:
     allowed_scales = _allowed_biome_scales(dim_id)
     if scale not in allowed_scales:
         raise RuntimeError(f"Unsupported biome scale: {scale}. Valid scales: {sorted(allowed_scales)}")
@@ -875,7 +875,11 @@ def _biome_grid_cached(seed: int, mc: int, dim_id: int,
             if not ptr:
                 raise RuntimeError("Biome generation failed")
             try:
-                grid = tuple(ptr[:n])
+                values = ptr[:n]
+                try:
+                    grid = bytes(values)
+                except ValueError:
+                    grid = tuple(values)
             finally:
                 lib.free_array(ptr)
     except RuntimeError:
@@ -969,12 +973,14 @@ def biomes():
     except RuntimeError as e:
         return error(str(e), 500)
 
-    if request.args.get("format") == "u8" and all(0 <= value <= 255 for value in grid):
+    if request.args.get("format") == "u8" and (
+        isinstance(grid, (bytes, bytearray)) or all(0 <= value <= 255 for value in grid)
+    ):
         payload = {
             "seed": seed_str, "version": version, "dimension": dimension,
             "x": x, "z": z, "w": w, "h": h, "scale": scale,
             "gridEncoding": "u8-b64",
-            "grid": base64.b64encode(bytes(grid)).decode("ascii"),
+            "grid": base64.b64encode(grid if isinstance(grid, (bytes, bytearray)) else bytes(grid)).decode("ascii"),
         }
     else:
         payload = {

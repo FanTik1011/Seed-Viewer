@@ -66,7 +66,7 @@ const MODERN_LODS = [
   { blocks: 16384, samples: 256, scale: 64 }
 ];
 const HEROKU_MODERN_LODS = [
-  { blocks: 256,   samples: 64,  scale: 4  },
+  { blocks: 512,   samples: 128, scale: 4  },
   { blocks: 1024,  samples: 64,  scale: 16 },
   { blocks: 4096,  samples: 64,  scale: 64 },
   { blocks: 16384, samples: 256, scale: 64 }
