@@ -5154,3 +5154,35 @@
       right: 8px !important;
     }
   }
+
+  /* Keep the Seed Finder trigger aligned with the right map controls. */
+  @media (min-width: 1021px) {
+    .map-panel,
+    .finder-tab {
+      --right-control-width: 152px;
+    }
+
+    .map-panel,
+    .finder-tab,
+    .finder-tab:hover {
+      width: var(--right-control-width) !important;
+    }
+
+    .finder-tab {
+      max-width: calc(100vw - 16px) !important;
+    }
+  }
+
+  @media (min-width: 1021px) and (max-width: 1500px) {
+    .map-panel,
+    .finder-tab {
+      --right-control-width: 196px;
+    }
+  }
+
+  @media (min-width: 1021px) and (max-width: 1100px) {
+    .map-panel,
+    .finder-tab {
+      --right-control-width: 176px;
+    }
+  }
