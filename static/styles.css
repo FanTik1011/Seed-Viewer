@@ -6725,3 +6725,100 @@
       width: 34px !important;
     }
   }
+
+  /* Favorite seed dates: show full day and time without clipping */
+  .favorite-seed-meta {
+    grid-template-columns: 1fr !important;
+    gap: 7px !important;
+  }
+
+  .favorite-seed-meta .meta-item {
+    overflow: visible !important;
+  }
+
+  .favorite-seed-meta .meta-value {
+    display: block !important;
+    width: 100% !important;
+    max-width: none !important;
+    box-sizing: border-box !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: nowrap !important;
+    font-size: 11px !important;
+  }
+
+  /* Cleaner favorite seed cards */
+  .favorite-seed-card {
+    padding: 13px !important;
+    border-radius: 10px !important;
+    gap: 12px !important;
+    background:
+      radial-gradient(circle at 0 0, rgba(255,111,145,.22), transparent 34%),
+      linear-gradient(180deg, #181327, #100e1d) !important;
+    border-color: rgba(255,111,145,.34) !important;
+    box-shadow:
+      inset 3px 0 rgba(255,111,145,.78),
+      inset 0 1px rgba(255,255,255,.06),
+      0 14px 30px rgba(0,0,0,.30) !important;
+  }
+
+  .favorite-seed-main {
+    gap: 4px !important;
+  }
+
+  .favorite-seed-value {
+    font-size: 15px !important;
+    line-height: 1.15 !important;
+  }
+
+  .favorite-seed-sub {
+    font-size: 11px !important;
+    color: #ffc1d1 !important;
+  }
+
+  .favorite-seed-meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 7px !important;
+  }
+
+  .favorite-seed-meta .meta-item {
+    display: grid !important;
+    grid-template-columns: auto minmax(0, 1fr) !important;
+    align-items: center !important;
+    gap: 8px !important;
+    min-height: 34px !important;
+    padding: 7px 8px !important;
+    border-radius: 8px !important;
+    background: rgba(12,11,24,.68) !important;
+    border: 1px solid rgba(255,111,145,.18) !important;
+    overflow: visible !important;
+  }
+
+  .favorite-seed-meta .meta-item:nth-child(1),
+  .favorite-seed-meta .meta-item:nth-child(2) {
+    grid-column: 1 / -1 !important;
+  }
+
+  .favorite-seed-meta .meta-label {
+    color: #a8b4c8 !important;
+    font-size: 9px !important;
+    white-space: nowrap !important;
+  }
+
+  .favorite-seed-meta .meta-value {
+    justify-self: end !important;
+    width: auto !important;
+    max-width: none !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    color: #ffffff !important;
+    text-align: right !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: nowrap !important;
+  }
+
+  .favorite-seed-actions {
+    gap: 8px !important;
+  }

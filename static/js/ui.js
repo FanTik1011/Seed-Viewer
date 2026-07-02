@@ -258,7 +258,7 @@ function renderFavoriteSeeds() {
       </div>
       <div class="favorite-seed-meta">
         <span class="meta-item"><span class="meta-label">Saved</span><b class="meta-value">${escapeHtml(compactDate(item.savedAt))}</b></span>
-        <span class="meta-item"><span class="meta-label">Loaded</span><b class="meta-value">${escapeHtml(compactDate(item.lastLoadedAt))}</b></span>
+        <span class="meta-item"><span class="meta-label">Last loaded</span><b class="meta-value">${escapeHtml(compactDate(item.lastLoadedAt))}</b></span>
         <span class="meta-item"><span class="meta-label">Loads</span><b class="meta-value">${escapeHtml(item.loadCount || 0)}</b></span>
         <span class="meta-item"><span class="meta-label">Center</span><b class="meta-value">${escapeHtml(`${item.centerX}, ${item.centerZ}`)}</b></span>
       </div>
