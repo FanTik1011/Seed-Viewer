@@ -39,6 +39,248 @@ async function copyText(text, message = "Copied") {
   showToast(message);
 }
 
+const FAVORITE_SEEDS_STORAGE_KEY = "seedmap.favoriteSeeds.v1";
+const FAVORITE_SEEDS_LIMIT = 80;
+
+function normalizeFavoriteSeed(seed) {
+  return String(seed || "").trim();
+}
+
+function favoriteKey(seed, version, dimension) {
+  return `${normalizeFavoriteSeed(seed)}|${version || "1.20"}|${dimension || "overworld"}`;
+}
+
+function currentFavoriteKey() {
+  const seed = normalizeFavoriteSeed(els.seedInput.value || state.seed);
+  if (!seed) return "";
+  return favoriteKey(seed, els.version.value, els.dimension.value || "overworld");
+}
+
+function selectedOptionText(select) {
+  return select?.selectedOptions?.[0]?.textContent?.trim() || select?.value || "";
+}
+
+function dimensionText(value) {
+  return value === "nether" ? "Nether" : value === "end" ? "The End" : "Overworld";
+}
+
+function compactDate(value) {
+  if (!value) return "Never";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Never";
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const year = String(date.getFullYear());
+  const hour = String(date.getHours()).padStart(2, "0");
+  const minute = String(date.getMinutes()).padStart(2, "0");
+  return `${day}.${month}.${year} ${hour}:${minute}`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, char => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  })[char]);
+}
+
+function sanitizeFavorite(item) {
+  const seed = normalizeFavoriteSeed(item?.seed);
+  if (!seed) return null;
+  const version = String(item.version || "1.20");
+  const dimension = String(item.dimension || "overworld");
+  return {
+    key: favoriteKey(seed, version, dimension),
+    seed,
+    version,
+    versionLabel: item.versionLabel || version,
+    dimension,
+    dimensionLabel: item.dimensionLabel || dimensionText(dimension),
+    centerX: Number.isFinite(Number(item.centerX)) ? Math.round(Number(item.centerX)) : 0,
+    centerZ: Number.isFinite(Number(item.centerZ)) ? Math.round(Number(item.centerZ)) : 0,
+    zoom: Number.isFinite(Number(item.zoom)) ? Number(item.zoom) : DEFAULT_ZOOM,
+    savedAt: item.savedAt || new Date().toISOString(),
+    lastLoadedAt: item.lastLoadedAt || "",
+    loadCount: Math.max(0, Number(item.loadCount) || 0)
+  };
+}
+
+function readFavoriteSeeds() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(FAVORITE_SEEDS_STORAGE_KEY) || "[]");
+    const seen = new Set();
+    state.favoriteSeeds = (Array.isArray(raw) ? raw : [])
+      .map(sanitizeFavorite)
+      .filter(item => item && !seen.has(item.key) && seen.add(item.key))
+      .slice(0, FAVORITE_SEEDS_LIMIT);
+  } catch {
+    state.favoriteSeeds = [];
+  }
+}
+
+function writeFavoriteSeeds() {
+  try {
+    localStorage.setItem(FAVORITE_SEEDS_STORAGE_KEY, JSON.stringify(state.favoriteSeeds.slice(0, FAVORITE_SEEDS_LIMIT)));
+  } catch {
+    showToast("Favorites could not be saved");
+  }
+}
+
+function favoriteSeedIndex(key = currentFavoriteKey()) {
+  if (!key) return -1;
+  return state.favoriteSeeds.findIndex(item => item.key === key);
+}
+
+function updateFavoriteButtons() {
+  const active = favoriteSeedIndex() !== -1;
+  [els.likeSeedBtn, els.likeActiveSeed].forEach(btn => {
+    if (!btn) return;
+    btn.classList.toggle("is-liked", active);
+    btn.setAttribute("aria-pressed", String(active));
+    btn.title = active ? "Remove from favorite seeds" : "Like current seed";
+  });
+  if (els.favoritesBtn) {
+    const count = state.favoriteSeeds.length;
+    els.favoritesBtn.dataset.count = String(count);
+    els.favoritesBtn.classList.toggle("has-favorites", count > 0);
+  }
+}
+
+function currentFavoritePayload() {
+  const seed = normalizeFavoriteSeed(els.seedInput.value || state.seed);
+  const version = els.version.value;
+  const dimension = els.dimension.value || "overworld";
+  const matchesLoadedWorld = state.loaded && state.seed === seed && state.version === version && state.dimension === dimension;
+  const now = new Date().toISOString();
+  return sanitizeFavorite({
+    seed,
+    version,
+    versionLabel: selectedOptionText(els.version) || version,
+    dimension,
+    dimensionLabel: dimensionText(dimension),
+    centerX: matchesLoadedWorld ? state.viewX : 0,
+    centerZ: matchesLoadedWorld ? state.viewZ : 0,
+    zoom: matchesLoadedWorld ? state.zoom : DEFAULT_ZOOM,
+    savedAt: now,
+    lastLoadedAt: matchesLoadedWorld ? now : "",
+    loadCount: matchesLoadedWorld ? 1 : 0
+  });
+}
+
+function toggleCurrentFavorite() {
+  const item = currentFavoritePayload();
+  if (!item) {
+    showToast("Enter a seed first");
+    return;
+  }
+  const index = favoriteSeedIndex(item.key);
+  if (index >= 0) {
+    state.favoriteSeeds.splice(index, 1);
+    showToast("Removed from favorites");
+  } else {
+    state.favoriteSeeds.unshift(item);
+    state.favoriteSeeds = state.favoriteSeeds.slice(0, FAVORITE_SEEDS_LIMIT);
+    showToast("Seed liked");
+  }
+  writeFavoriteSeeds();
+  renderFavoriteSeeds();
+  updateFavoriteButtons();
+}
+
+function setFavoritesVisible(visible) {
+  if (!els.favoritesPanel) return;
+  if (visible && els.finderPanel && !els.finderPanel.classList.contains("is-hidden")) setFinderVisible(false);
+  els.favoritesPanel.classList.toggle("is-hidden", !visible);
+  els.favoritesPanel.setAttribute("aria-hidden", String(!visible));
+  els.favoritesBtn?.setAttribute("aria-expanded", String(visible));
+  document.body.classList.toggle("favorites-open", visible);
+  if (visible) renderFavoriteSeeds();
+}
+
+function markFavoriteLoaded(item) {
+  const index = favoriteSeedIndex(item.key);
+  if (index < 0) return;
+  state.favoriteSeeds[index] = {
+    ...state.favoriteSeeds[index],
+    centerX: Number.isFinite(state.viewX) ? Math.round(state.viewX) : item.centerX,
+    centerZ: Number.isFinite(state.viewZ) ? Math.round(state.viewZ) : item.centerZ,
+    zoom: Number.isFinite(state.zoom) ? state.zoom : item.zoom,
+    lastLoadedAt: new Date().toISOString(),
+    loadCount: (Number(state.favoriteSeeds[index].loadCount) || 0) + 1
+  };
+  writeFavoriteSeeds();
+  renderFavoriteSeeds();
+  updateFavoriteButtons();
+}
+
+function loadFavoriteSeed(item) {
+  els.seedInput.value = item.seed;
+  if ([...els.version.options].some(option => option.value === item.version)) els.version.value = item.version;
+  if ([...els.dimension.options].some(option => option.value === item.dimension)) els.dimension.value = item.dimension;
+  loadWorld({
+    seed: item.seed,
+    version: els.version.value,
+    dimension: els.dimension.value,
+    centerX: item.centerX,
+    centerZ: item.centerZ,
+    zoom: item.zoom || DEFAULT_ZOOM
+  }).then(() => {
+    if (state.loaded && state.seed === item.seed && state.version === els.version.value && state.dimension === els.dimension.value) {
+      markFavoriteLoaded(item);
+    }
+  });
+  showToast("Favorite seed loaded");
+}
+
+function removeFavoriteSeed(key) {
+  const index = favoriteSeedIndex(key);
+  if (index < 0) return;
+  state.favoriteSeeds.splice(index, 1);
+  writeFavoriteSeeds();
+  renderFavoriteSeeds();
+  updateFavoriteButtons();
+  showToast("Favorite removed");
+}
+
+function renderFavoriteSeeds() {
+  if (!els.favoritesList || !els.favoritesEmpty) return;
+  els.favoritesList.innerHTML = "";
+  els.favoritesEmpty.classList.toggle("hidden", state.favoriteSeeds.length > 0);
+  for (const item of state.favoriteSeeds) {
+    const card = document.createElement("div");
+    card.className = "favorite-seed-card";
+    card.innerHTML = `
+      <div class="favorite-seed-main">
+        <span class="favorite-seed-value">${escapeHtml(item.seed)}</span>
+        <span class="favorite-seed-sub">${escapeHtml(item.versionLabel || item.version)} · ${escapeHtml(item.dimensionLabel || dimensionText(item.dimension))}</span>
+      </div>
+      <div class="favorite-seed-meta">
+        <span class="meta-item"><span class="meta-label">Saved</span><b class="meta-value">${escapeHtml(compactDate(item.savedAt))}</b></span>
+        <span class="meta-item"><span class="meta-label">Loaded</span><b class="meta-value">${escapeHtml(compactDate(item.lastLoadedAt))}</b></span>
+        <span class="meta-item"><span class="meta-label">Loads</span><b class="meta-value">${escapeHtml(item.loadCount || 0)}</b></span>
+        <span class="meta-item"><span class="meta-label">Center</span><b class="meta-value">${escapeHtml(`${item.centerX}, ${item.centerZ}`)}</b></span>
+      </div>
+      <div class="favorite-seed-actions">
+        <button class="mini-link favorite-load" type="button">Load</button>
+        <button class="mini-link favorite-copy" type="button">Copy</button>
+        <button class="icon-only favorite-remove" type="button" title="Remove favorite">${ICONS.trash}</button>
+      </div>
+    `;
+    card.querySelector(".favorite-load").addEventListener("click", () => loadFavoriteSeed(item));
+    card.querySelector(".favorite-copy").addEventListener("click", () => copyText(item.seed, "Seed copied"));
+    card.querySelector(".favorite-remove").addEventListener("click", () => removeFavoriteSeed(item.key));
+    els.favoritesList.append(card);
+  }
+}
+
+function initFavoriteSeeds() {
+  readFavoriteSeeds();
+  renderFavoriteSeeds();
+  updateFavoriteButtons();
+}
+
 function copyCoords(point, label = "Coordinates copied") {
   copyText(`${point.x}, ${point.z}`, label);
 }
@@ -118,6 +360,7 @@ function toggleBottomMenu() {
 }
 
 function setFinderVisible(visible) {
+  if (visible && els.favoritesPanel && !els.favoritesPanel.classList.contains("is-hidden")) setFavoritesVisible(false);
   els.finderPanel.classList.toggle("is-hidden", !visible);
   els.finderOpen.classList.toggle("visible", !visible);
   els.finderPanel.setAttribute("aria-hidden", String(!visible));
@@ -280,7 +523,10 @@ function bindEvents() {
   }, { passive: false });
 
   els.menuToggle.addEventListener("click", toggleBottomMenu);
-  els.seedInput.addEventListener("input", () => scheduleAutoLoad());
+  els.seedInput.addEventListener("input", () => {
+    scheduleAutoLoad();
+    updateFavoriteButtons();
+  });
   els.seedInput.addEventListener("keydown", event => {
     if (event.key === "Enter") {
       event.preventDefault();
@@ -327,9 +573,16 @@ function bindEvents() {
   });
   els.finderClose.addEventListener("click", () => setFinderVisible(false));
   els.finderOpen.addEventListener("click", () => setFinderVisible(true));
+  els.likeSeedBtn?.addEventListener("click", toggleCurrentFavorite);
+  els.likeActiveSeed?.addEventListener("click", toggleCurrentFavorite);
+  els.favoritesBtn?.addEventListener("click", () => setFavoritesVisible(true));
+  els.favoritesClose?.addEventListener("click", () => setFavoritesVisible(false));
   window.addEventListener("keydown", event => {
     if (event.key === "Escape" && !els.finderPanel.classList.contains("is-hidden")) {
       setFinderVisible(false);
+    }
+    if (event.key === "Escape" && els.favoritesPanel && !els.favoritesPanel.classList.contains("is-hidden")) {
+      setFavoritesVisible(false);
     }
   });
   document.getElementById("go-btn").addEventListener("click", goToCoordinates);
@@ -360,10 +613,12 @@ function bindEvents() {
   });
   els.version.addEventListener("change", () => {
     updateEditionLabel(els.version.value);
+    updateFavoriteButtons();
     if (state.loaded) loadWorld({ seed: state.seed, version: els.version.value, dimension: els.dimension.value, centerX: state.viewX, centerZ: state.viewZ, zoom: state.zoom });
     else scheduleAutoLoad(0);
   });
   els.dimension.addEventListener("change", () => {
+    updateFavoriteButtons();
     if (state.loaded) loadWorld({ seed: state.seed, version: els.version.value, dimension: els.dimension.value, centerX: state.viewX, centerZ: state.viewZ, zoom: state.zoom });
     else scheduleAutoLoad(0);
     buildSidebar();

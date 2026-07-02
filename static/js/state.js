@@ -56,7 +56,15 @@ const els = {
   popoverCoords: document.getElementById("popover-coords"),
   popoverChunk: document.getElementById("popover-chunk"),
   popoverBiome: document.getElementById("popover-biome"),
-  shareUrlBtn: document.getElementById("share-url-btn")
+  shareUrlBtn: document.getElementById("share-url-btn"),
+  likeSeedBtn: document.getElementById("like-seed-btn"),
+  likeActiveSeed: document.getElementById("like-active-seed"),
+  favoritesBtn: document.getElementById("favorites-btn"),
+  favoritesPanel: document.getElementById("favorites-panel"),
+  favoritesList: document.getElementById("favorites-list"),
+  favoritesEmpty: document.getElementById("favorites-empty"),
+  favoritesClose: document.getElementById("close-favorites"),
+  favoritesHeadIcon: document.getElementById("favorites-head-icon")
 };
 
 const state = {
@@ -88,6 +96,7 @@ const state = {
   finderStructures: new Map([["Village", 1]]),
   finderResults: [],
   finderBusy: false,
+  favoriteSeeds: [],
   cursor: { x: 0, z: 0 },
   selected: null,
   capabilities: null,

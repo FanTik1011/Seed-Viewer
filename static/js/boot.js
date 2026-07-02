@@ -1,4 +1,5 @@
 bootIcons();
+initFavoriteSeeds();
 initWorker();
 bindEvents();
 resizeCanvas();

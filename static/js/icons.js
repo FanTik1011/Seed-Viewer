@@ -13,7 +13,10 @@ function bootIcons() {
   document.getElementById("brand-icon").innerHTML = iconMarkup("map", iconAsset("spawn"));
   document.getElementById("empty-icon").innerHTML = iconMarkup("map", iconAsset("spawn"));
   setIcon("random-btn", "shuffle", "Random");
+  setIcon("like-seed-btn", "heart");
+  setIcon("favorites-btn", "list", "Favorites");
   setIcon("copy-seed-btn", "copy", "Copy seed");
+  setIcon("like-active-seed", "heart");
   setIcon("copy-active-seed", "copy");
   if (document.getElementById("copy-cursor")) setIcon("copy-cursor", "copy");
   setIcon("zoom-in", "plus");
@@ -29,4 +32,8 @@ function bootIcons() {
   setIcon("open-finder-btn", "search", "Seed Finder");
   setIcon("close-popover", "close");
   setIcon("share-url-btn", "link", "Share");
+  setIcon("close-favorites", "close");
+  if (document.getElementById("favorites-head-icon")) {
+    document.getElementById("favorites-head-icon").innerHTML = iconMarkup("heart");
+  }
 }

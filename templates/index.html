@@ -61,6 +61,8 @@
     </div>
 
     <div class="top-actions">
+      <button class="btn like" id="like-seed-btn" title="Like current seed" aria-pressed="false"></button>
+      <button class="btn ghost" id="favorites-btn" title="Favorite seeds"></button>
       <button class="btn warn" id="copy-seed-btn"></button>
       <button class="btn ghost" id="share-url-btn" title="Copy shareable URL"></button>
     </div>
@@ -146,6 +148,7 @@
         <div class="tiny-label">Active seed</div>
         <div class="seed-line">
           <span class="seed-mono" id="active-seed-val"></span>
+          <button class="icon-only like" id="like-active-seed" title="Like current seed" aria-pressed="false"></button>
           <button class="icon-only" id="copy-active-seed" title="Copy seed"></button>
         </div>
       </div>
@@ -208,7 +211,7 @@
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="6.5" cy="6.5" r="4.5" stroke="currentColor" stroke-width="1.6"/><path d="M10 10L14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
           <strong>Seed Finder</strong>
         </div>
-        <button class="finder-close-btn" id="close-finder" type="button" aria-label="Close">✕</button>
+        <button class="finder-close-btn" id="close-finder" type="button" aria-label="Close Seed Finder"></button>
       </div>
 
       <div class="finder-scroll">
@@ -264,6 +267,23 @@
           <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="6.5" cy="6.5" r="4.5" stroke="currentColor" stroke-width="1.6"/><path d="M10 10L14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
           Find Seeds
         </button>
+      </div>
+    </div>
+
+    <div class="favorites-drawer is-hidden" id="favorites-panel" aria-hidden="true">
+      <div class="favorites-head">
+        <div class="favorites-head-text">
+          <span class="favorites-head-icon" id="favorites-head-icon"></span>
+          <strong>Favorite Seeds</strong>
+        </div>
+        <button class="favorites-close-btn" id="close-favorites" type="button" aria-label="Close Favorite Seeds"></button>
+      </div>
+      <div class="favorites-scroll">
+        <div class="favorites-empty" id="favorites-empty">
+          <strong>No liked seeds yet</strong>
+          <span>Press the heart on any seed to save its version, dimension, map position, and load history.</span>
+        </div>
+        <div class="favorites-list" id="favorites-list"></div>
       </div>
     </div>
 

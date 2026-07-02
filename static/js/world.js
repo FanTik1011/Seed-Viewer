@@ -48,6 +48,7 @@ async function loadWorld(options = {}) {
     if (data.spawn) selectLocation({ type:"spawn", ...data.spawn, ...STRUCT_META.spawn });
     els.activeSeed.textContent = seed;
     els.seedCard.classList.add("visible");
+    updateFavoriteButtons();
     buildSidebar();
     scheduleUrlUpdate();
     requestRender();
