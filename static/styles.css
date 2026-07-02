@@ -6477,3 +6477,251 @@
       bottom: 112px !important;
     }
   }
+
+  /* Final left sidebar sizing: keep the footer controls and arrow visually aligned */
+  .sidebar .go-panel {
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 10px !important;
+    width: auto !important;
+    max-width: 100% !important;
+  }
+
+  .sidebar .go-grid {
+    width: 100% !important;
+  }
+
+  .sidebar .menu-toggle {
+    width: 42px !important;
+    height: 92px !important;
+  }
+
+  body.sidebar-hidden .sidebar.is-collapsed .menu-toggle {
+    width: 42px !important;
+    height: 96px !important;
+  }
+
+  @media (max-width: 760px) {
+    .sidebar .go-panel {
+      left: 0 !important;
+      right: 0 !important;
+      max-width: 100% !important;
+    }
+  }
+
+  /* Reference-style left panel with the newer seed actions kept in place */
+  @media (min-width: 701px) {
+    :root {
+      --left-panel-width-final: 320px;
+      --left-panel-left-final: 8px;
+      --left-panel-topbar-height-final: 154px;
+    }
+
+    .layout::before {
+      left: 4px !important;
+      top: 8px !important;
+      bottom: 8px !important;
+      width: calc(var(--left-panel-width-final) + 8px) !important;
+      border-radius: 14px !important;
+      background: rgba(18,17,32,.96) !important;
+      border: 1px solid rgba(134,129,190,.22) !important;
+      box-shadow: 0 20px 44px rgba(0,0,0,.46), inset 0 1px rgba(255,255,255,.05) !important;
+    }
+
+    .topbar {
+      left: var(--left-panel-left-final) !important;
+      top: 14px !important;
+      width: var(--left-panel-width-final) !important;
+      height: var(--left-panel-topbar-height-final) !important;
+      padding: 10px 14px 12px !important;
+      display: grid !important;
+      grid-template-columns: minmax(0, 1fr) repeat(4, 36px) !important;
+      grid-template-rows: 40px 40px 36px !important;
+      grid-template-areas:
+        "seed like fav copy share"
+        "version version version version version"
+        "random random random random random" !important;
+      gap: 8px !important;
+      border-radius: 14px 14px 0 0 !important;
+      border: 0 !important;
+      border-bottom: 1px solid rgba(134,129,190,.22) !important;
+      background: transparent !important;
+      box-shadow: none !important;
+    }
+
+    .brand {
+      display: none !important;
+    }
+
+    .seed-form,
+    .top-actions {
+      display: contents !important;
+    }
+
+    #seed-input {
+      grid-area: seed !important;
+      min-width: 0 !important;
+      height: 40px !important;
+      border-radius: 8px !important;
+    }
+
+    #like-seed-btn {
+      grid-area: like !important;
+    }
+
+    #favorites-btn {
+      grid-area: fav !important;
+    }
+
+    #copy-seed-btn {
+      grid-area: copy !important;
+    }
+
+    #share-url-btn {
+      grid-area: share !important;
+    }
+
+    #version-select {
+      grid-area: version !important;
+      height: 40px !important;
+      border-radius: 8px !important;
+    }
+
+    #dimension-select {
+      display: none !important;
+    }
+
+    #random-btn {
+      grid-area: random !important;
+      height: 36px !important;
+      border-radius: 4px !important;
+    }
+
+    .top-actions .btn {
+      width: 36px !important;
+      height: 40px !important;
+      min-width: 0 !important;
+      border-radius: 8px !important;
+      padding: 0 !important;
+    }
+
+    #favorites-btn.has-favorites::after {
+      right: -5px !important;
+      top: -8px !important;
+    }
+
+    .sidebar {
+      left: var(--left-panel-left-final) !important;
+      top: calc(14px + var(--left-panel-topbar-height-final)) !important;
+      bottom: 8px !important;
+      width: var(--left-panel-width-final) !important;
+      padding: 0 !important;
+      border-radius: 0 0 14px 14px !important;
+      background: transparent !important;
+      box-shadow: none !important;
+      overflow: visible !important;
+    }
+
+    .features-panel {
+      inset: 0 0 112px 0 !important;
+      width: 100% !important;
+      padding: 0 14px 0 !important;
+    }
+
+    .features-panel .section-title {
+      height: 40px !important;
+      padding: 0 0 0 2px !important;
+      margin: 0 !important;
+      border-bottom: 0 !important;
+    }
+
+    .features-panel .feature-scroll {
+      padding: 0 0 8px !important;
+    }
+
+    .features-panel .struct-list,
+    .features-panel .biome-list {
+      grid-template-columns: 1fr 1fr !important;
+      gap: 7px 9px !important;
+    }
+
+    .features-panel .layer-row {
+      min-width: 0 !important;
+      min-height: 34px !important;
+      border-radius: 9px !important;
+    }
+
+    .sidebar .go-panel {
+      left: 0 !important;
+      right: 0 !important;
+      bottom: 0 !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      height: 112px !important;
+      padding: 16px 14px 14px !important;
+      border: 0 !important;
+      border-top: 1px solid rgba(134,129,190,.18) !important;
+      border-radius: 0 0 14px 14px !important;
+      background: rgba(18,17,32,.94) !important;
+      box-shadow: 0 -10px 22px rgba(7,7,16,.24) !important;
+      overflow: hidden !important;
+    }
+
+    .sidebar .go-panel::before,
+    .sidebar .go-panel .section-title,
+    .sidebar .go-panel .panel-actions {
+      display: none !important;
+    }
+
+    .sidebar .go-grid {
+      width: 100% !important;
+      height: 100% !important;
+      display: grid !important;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+      gap: 8px !important;
+      position: relative !important;
+      z-index: 1 !important;
+    }
+
+    .sidebar .go-grid .number,
+    .sidebar .go-grid .btn {
+      min-width: 0 !important;
+      width: 100% !important;
+      height: 40px !important;
+      border-radius: 8px !important;
+    }
+
+    .sidebar .go-grid .btn {
+      grid-column: 1 / -1 !important;
+    }
+
+    .sidebar .menu-toggle {
+      left: calc(var(--left-panel-left-final) + var(--left-panel-width-final)) !important;
+      right: auto !important;
+      top: 50% !important;
+      width: 36px !important;
+      height: 92px !important;
+      border-radius: 0 10px 10px 0 !important;
+      transform: translateY(-50%) !important;
+    }
+
+    body.sidebar-hidden .sidebar.is-collapsed .menu-toggle {
+      left: 8px !important;
+      width: 42px !important;
+      height: 96px !important;
+    }
+  }
+
+  @media (min-width: 701px) and (max-width: 1100px) {
+    :root {
+      --left-panel-width-final: 300px;
+    }
+
+    .topbar {
+      grid-template-columns: minmax(0, 1fr) repeat(4, 34px) !important;
+    }
+
+    .top-actions .btn {
+      width: 34px !important;
+    }
+  }
