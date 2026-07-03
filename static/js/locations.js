@@ -289,8 +289,25 @@ function finderFilterText(input) {
 }
 
 function clearFinderResults() {
+  state.finderLastSearch = null;
   state.finderResults = [];
   if (els.finderResults) els.finderResults.innerHTML = "";
+}
+
+function snapshotFinderSearch() {
+  if (!state.finderLastSearch || !state.finderResults.length) return null;
+  return {
+    data: state.finderLastSearch,
+    status: els.finderStatus?.textContent || ""
+  };
+}
+
+function restoreFinderSearch(snapshot) {
+  if (!snapshot?.data) return;
+  state.finderLastSearch = snapshot.data;
+  state.finderResults = snapshot.data.results || [];
+  renderSeedSearchResults(snapshot.data);
+  if (snapshot.status && els.finderStatus) els.finderStatus.textContent = snapshot.status;
 }
 
 function toggleFinderBiome(id) {
@@ -378,6 +395,8 @@ async function searchMatchingSeeds() {
   state.finderBusy = true;
   els.finderBtn.disabled = true;
   els.finderStatus.textContent = `Searching ${attempts} seeds within ${radius} blocks...`;
+  state.finderLastSearch = null;
+  state.finderResults = [];
   els.finderResults.innerHTML = "";
   try {
     const data = await workerRequest("searchSeeds", {
@@ -390,6 +409,7 @@ async function searchMatchingSeeds() {
       required: structures.join(","),
       biomes: biomeIds.join(",")
     });
+    state.finderLastSearch = data;
     state.finderResults = data.results || [];
     renderSeedSearchResults(data);
   } catch (err) {
@@ -438,16 +458,22 @@ function renderSeedSearchResults(data) {
         ${structureLines}
       </div>
     `;
-    card.querySelector(".load-seed").addEventListener("click", () => {
+    card.querySelector(".load-seed").addEventListener("click", async () => {
+      const finderSnapshot = snapshotFinderSearch();
       els.seedInput.value = item.seed;
-      loadWorld({
-        seed: item.seed,
-        version: els.version.value,
-        dimension: "overworld",
-        centerX: center.x,
-        centerZ: center.z,
-        zoom: Math.min(state.zoom || DEFAULT_ZOOM, DEFAULT_ZOOM)
-      });
+      try {
+        await loadWorld({
+          seed: item.seed,
+          version: els.version.value,
+          dimension: "overworld",
+          centerX: center.x,
+          centerZ: center.z,
+          zoom: Math.min(state.zoom || DEFAULT_ZOOM, DEFAULT_ZOOM),
+          preserveFinderResults: true
+        });
+      } finally {
+        restoreFinderSearch(finderSnapshot);
+      }
       showToast("Seed loaded");
     });
     els.finderResults.append(card);

@@ -94,6 +94,7 @@ const state = {
   highlightedBiome: null,
   finderBiomes: new Set(["1"]),
   finderStructures: new Map([["Village", 1]]),
+  finderLastSearch: null,
   finderResults: [],
   finderBusy: false,
   favoriteSeeds: [],

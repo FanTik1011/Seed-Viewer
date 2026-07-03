@@ -29,8 +29,6 @@ async function loadWorld(options = {}) {
   state.structures = {};
   resetStructureStream();
   state.selected = null;
-  state.finderResults = [];
-  if (els.finderResults) els.finderResults.innerHTML = "";
   els.empty.classList.add("hidden");
   showLoader("Loading seed", "Preparing fast map preview...");
   try {
