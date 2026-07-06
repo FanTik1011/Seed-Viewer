@@ -25,6 +25,7 @@ const WATER_BIOMES = new Set([0, 7, 10, 11, 24, 44, 45, 46, 47, 48, 49, 50]);
 const DEEP_WATER_BIOMES = new Set([24, 47, 48, 49, 50]);
 const BEACH_BIOMES = new Set([16, 26]);
 const SAND_BIOMES = new Set([2, 16, 17, 26, 130]);
+const DRY_BIOMES = new Set([35, 36, 37, 38, 39, 163, 164, 165, 166, 167]);
 const FOREST_BIOMES = new Set([4, 18, 21, 27, 28, 29, 32, 33, 132, 155, 156, 157, 168, 169, 185]);
 const BIOME_TILE_RENDER_SCALE = 1;
 
@@ -71,17 +72,23 @@ function stylizedBiomeRgb(rgb, worldX, worldZ, biomeId) {
   let lift = n2 * 5 + n3 * 2;
 
   if (WATER_BIOMES.has(biomeId)) {
-    contrast = 1 + n1 * 0.055;
-    lift = DEEP_WATER_BIOMES.has(biomeId) ? -10 + n2 * 4 : 2 + n2 * 4;
-    r = mixChannel(r, 18, 0.24);
-    g = mixChannel(g, 122, 0.18);
-    b = mixChannel(b, 205, 0.18);
+    contrast = 1 + n1 * 0.045;
+    lift = DEEP_WATER_BIOMES.has(biomeId) ? -14 + n2 * 3 : -2 + n2 * 3;
+    r = mixChannel(r, 22, 0.3);
+    g = mixChannel(g, 108, 0.24);
+    b = mixChannel(b, 182, 0.22);
   } else if (SAND_BIOMES.has(biomeId)) {
-    r = mixChannel(r, 242, 0.24);
-    g = mixChannel(g, 215, 0.18);
-    b = mixChannel(b, 126, 0.10);
+    r = mixChannel(r, 225, 0.22);
+    g = mixChannel(g, 198, 0.18);
+    b = mixChannel(b, 121, 0.12);
     contrast = 1 + n1 * 0.06;
-    lift += 6;
+    lift += 2;
+  } else if (DRY_BIOMES.has(biomeId)) {
+    r = mixChannel(r, 183, 0.22);
+    g = mixChannel(g, 155, 0.18);
+    b = mixChannel(b, 72, 0.16);
+    contrast = 1 + n1 * 0.055;
+    lift -= 1;
   } else if (FOREST_BIOMES.has(biomeId)) {
     r = mixChannel(r, 52, 0.16);
     g = mixChannel(g, 118, 0.16);
@@ -144,14 +151,14 @@ function applyStylizedBiomePixel(pixels, j, rgb, grid, s, x, z, worldX, worldZ, 
 
   if (water && besideLand) {
     const t = landDist === 1 ? 0.38 : landDist === 2 ? 0.22 : 0.12;
-    r = mixChannel(r, 72, t);
-    g = mixChannel(g, 190, t);
-    b = mixChannel(b, 224, t * 0.9);
+    r = mixChannel(r, 62, t);
+    g = mixChannel(g, 166, t);
+    b = mixChannel(b, 204, t * 0.88);
   } else if (!water && besideWater) {
     const shore = waterDist === 1 ? 0.36 : waterDist === 2 ? 0.2 : 0.1;
     const beachTint = BEACH_BIOMES.has(biomeId) || SAND_BIOMES.has(biomeId) ? shore * 1.2 : shore;
-    r = mixChannel(r, 238, beachTint);
-    g = mixChannel(g, 211, beachTint * 0.95);
+    r = mixChannel(r, 225, beachTint);
+    g = mixChannel(g, 199, beachTint * 0.92);
     b = mixChannel(b, 128, beachTint * 0.62);
   }
 
@@ -261,6 +268,7 @@ function buildHillshadeBitmap(grid, paddedSamples, scale) {
       data[i + 3] = 255;
     }
   }
+  softenBiomePixels(pixels, s, 0.18);
   ctx.putImageData(img, 0, 0);
   return canvas.transferToImageBitmap();
 }
@@ -334,13 +342,14 @@ function upscaleBiomeCanvas(source, samples, scale) {
       outData[outI + 3] = 255;
     }
   }
-  softenBiomePixels(outData, size);
+  softenBiomePixels(outData, size, 0.34);
   outCtx.putImageData(outImg, 0, 0);
   return out;
 }
 
-function softenBiomePixels(data, size) {
+function softenBiomePixels(data, size, amount = 0.22) {
   const copy = new Uint8ClampedArray(data);
+  const keep = 1 - amount;
   for (let y = 1; y < size - 1; y++) {
     for (let x = 1; x < size - 1; x++) {
       const i = (y * size + x) * 4;
@@ -350,7 +359,7 @@ function softenBiomePixels(data, size) {
       const e = (y * size + x + 1) * 4;
       for (let c = 0; c < 3; c++) {
         const avg = (copy[i + c] * 4 + copy[n + c] + copy[s + c] + copy[w + c] + copy[e + c]) / 8;
-        data[i + c] = copy[i + c] * 0.58 + avg * 0.42;
+        data[i + c] = copy[i + c] * keep + avg * amount;
       }
     }
   }

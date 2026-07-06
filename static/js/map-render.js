@@ -319,7 +319,7 @@ function drawGrid(range) {
   const tilePx = TILE_BLOCKS / state.zoom;
   if (tilePx < 18) return;
   ctx.lineWidth = 1;
-  ctx.strokeStyle = tilePx > 80 ? "rgba(6,18,22,.18)" : "rgba(6,18,22,.11)";
+  ctx.strokeStyle = tilePx > 80 ? "rgba(6,18,22,.09)" : "rgba(6,18,22,.055)";
   for (let tx = range.txMin; tx <= range.txMax + 1; tx++) {
     const x = worldToScreen(tx * TILE_BLOCKS, 0).x;
     ctx.beginPath();
