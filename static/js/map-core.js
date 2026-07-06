@@ -35,7 +35,8 @@ function dimensionCaps(dimension = state.dimension) {
     biomes: dimension === "overworld",
     structures: dimension !== "end",
     spawn: dimension === "overworld",
-    strongholds: dimension === "overworld"
+    strongholds: dimension === "overworld",
+    heights: dimension === "overworld"
   };
 }
 

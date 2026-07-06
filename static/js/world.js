@@ -25,6 +25,8 @@ async function loadWorld(options = {}) {
   zoomTileLoadingPaused = false;
   state.tiles.clear();
   state.tileQueue.clear();
+  state.heightTiles.clear();
+  state.heightPending.clear();
   tileBuildQueue.length = 0;
   state.structures = {};
   resetStructureStream();

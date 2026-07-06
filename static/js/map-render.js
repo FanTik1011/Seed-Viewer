@@ -24,6 +24,7 @@ function render() {
   if (detailedBiomes) {
     drawBiomes(range, !pauseBiomeLoading);
     drawHighlightedBiome(range);
+    drawTerrainRelief(range, !pauseBiomeLoading);
     if (!pauseBiomeLoading) prefetchAround(range);
     drawMapVignette();
   } else {
@@ -89,7 +90,11 @@ function drawFallbackTile(fineLod, tx, tz, px, pz, pxSize) {
     const sx = (wx - ctx2 * c.blocks) / c.scale;
     const sy = (wz - ctz * c.blocks) / c.scale;
     const sSize = fine.blocks / c.scale;
-    ctx.drawImage(tile.canvas, sx, sy, sSize, sSize, px, pz, pxSize, pxSize);
+    const sourceScale = tile.canvas.width / tile.samples;
+    const moving = mapIsMoving();
+    ctx.imageSmoothingEnabled = !moving && pxSize < 220;
+    if (ctx.imageSmoothingEnabled) ctx.imageSmoothingQuality = "medium";
+    ctx.drawImage(tile.canvas, sx * sourceScale, sy * sourceScale, sSize * sourceScale, sSize * sourceScale, px, pz, pxSize, pxSize);
     tile.last = performance.now();
     return true;
   }
@@ -102,6 +107,11 @@ function drawBiomes(range, queueVisible = true) {
   const tiles = orderedTiles(range);
   let queuedThisFrame = 0;
   const queueBudget = state.tileQueue.size > MAX_TILE_QUEUE_WHILE_LOADING ? 0 : MAX_TILE_ENQUEUE_PER_RENDER;
+  const moving = mapIsMoving();
+  const smoothTiles = !moving && tilePx < 220;
+  ctx.save();
+  ctx.imageSmoothingEnabled = smoothTiles;
+  if (smoothTiles) ctx.imageSmoothingQuality = "medium";
   for (const item of tiles) {
       const { tx, tz } = item;
       const key = tileKey(range.lod, tx, tz);
@@ -122,6 +132,7 @@ function drawBiomes(range, queueVisible = true) {
         drawPendingTile(pos, tilePx, item.dist);
       }
   }
+  ctx.restore();
   if (queuedThisFrame >= queueBudget && queueBudget > 0) requestRender();
 }
 
@@ -254,6 +265,54 @@ function drawLoadedTileOutline(range) {
 
 function drawMapVignette() {
 
+}
+
+function drawTerrainRelief(range, queueVisible = true) {
+  if (!reliefDataActive() || range.tilePx < 20) return;
+  const cfg = LODS[range.lod];
+  const tilePx = cfg.blocks / state.zoom;
+  const moving = mapIsMoving();
+  const smoothRelief = !moving && tilePx < 220;
+  ctx.save();
+  ctx.strokeStyle = "rgba(28,22,13,.32)";
+  for (let tz = range.tzMin; tz <= range.tzMax; tz++) {
+    for (let tx = range.txMin; tx <= range.txMax; tx++) {
+      if (queueVisible) ensureHeightTile(range.lod, tx, tz);
+      const tile = state.heightTiles.get(heightTileKey(range.lod, tx, tz));
+      if (!tile) continue;
+      tile.last = performance.now();
+      const pos = worldToScreen(tx * cfg.blocks, tz * cfg.blocks);
+      const px = Math.round(pos.x);
+      const pz = Math.round(pos.y);
+      if (tile.shadeBitmap) {
+        ctx.save();
+        ctx.globalCompositeOperation = "overlay";
+        ctx.globalAlpha = moving ? .38 : state.showContours ? .56 : .5;
+        ctx.imageSmoothingEnabled = smoothRelief;
+        if (smoothRelief) ctx.imageSmoothingQuality = "medium";
+        ctx.drawImage(tile.shadeBitmap, px, pz, tilePx + 1, tilePx + 1);
+        ctx.restore();
+      }
+      if (state.showContours && tile.contourPath && range.tilePx >= 32) {
+        const cellPx = tile.scale / state.zoom;
+        const contourAlpha = moving
+          ? .09
+          : range.tilePx > 190 ? .1
+          : range.tilePx > 92 ? .14
+          : .18;
+        ctx.save();
+        ctx.translate(px, pz);
+        ctx.scale(cellPx, cellPx);
+        ctx.lineWidth = Math.max(.42 / cellPx, .34);
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.strokeStyle = `rgba(38,43,22,${contourAlpha})`;
+        ctx.stroke(tile.contourPath);
+        ctx.restore();
+      }
+    }
+  }
+  ctx.restore();
 }
 
 function drawGrid(range) {

@@ -2,26 +2,31 @@ const API = self.location.pathname.replace(/\/static\/seed-worker\.js$/, "");
 const controllers = new Map();
 const UNKNOWN_BIOME_RGB = [38, 45, 41];
 const BIOME_COLORS = {
-  0:"#000070",1:"#8DB360",2:"#FA9418",3:"#606060",4:"#056621",5:"#0B6659",
-  6:"#07F9B2",7:"#0000FF",8:"#BF3B3B",9:"#8080FF",10:"#7070D6",11:"#A0A0FF",
-  12:"#FFFFFF",13:"#A0A0A0",14:"#FF00FF",15:"#A000FF",16:"#FADE55",17:"#D25F12",
-  18:"#22551C",19:"#163933",20:"#72789A",21:"#537B09",22:"#2C4205",23:"#628B17",
-  24:"#000030",25:"#A2A284",26:"#FAF0C0",27:"#307444",28:"#1F5F32",29:"#40511A",
-  30:"#31554A",31:"#243F36",32:"#596651",33:"#454F3E",34:"#507050",35:"#BDB25F",
-  36:"#A79D64",37:"#D94515",38:"#B09765",39:"#CA8C65",40:"#8080FF",41:"#8080FF",
-  42:"#8080FF",43:"#8080FF",44:"#0000AC",45:"#000090",46:"#202070",47:"#000050",
-  48:"#000040",49:"#202038",50:"#404090",51:"#8FA35A",52:"#1F8F4A",53:"#7F8F4A",
-  127:"#000000",129:"#B5DB88",130:"#FFBC40",
-  131:"#888888",132:"#2D8E49",133:"#338E81",134:"#2FFFDA",140:"#B4DCDC",
-  149:"#7BA331",151:"#8AB33F",155:"#589C6C",156:"#47875A",157:"#687942",
-  158:"#597D72",160:"#818E79",161:"#6D7766",162:"#789878",163:"#E5DA87",
-  164:"#CFC58C",165:"#FF6D3D",166:"#D8BF8D",167:"#F2B48D",168:"#768E14",
-  169:"#3B470A",170:"#5E3830",171:"#DD0808",172:"#49907B",173:"#403636",
-  174:"#507050",175:"#59C93C",177:"#60A445",178:"#47783E",179:"#FFFFFF",
-  180:"#B0B0B0",181:"#D8D8D8",182:"#A2A284",183:"#303050",184:"#2F6F50",
-  185:"#F7B2C4",186:"#C9D6C9"
+  0:"#0059d7",1:"#a4d34f",2:"#f8e283",3:"#709159",4:"#19792d",5:"#0d7a6e",
+  6:"#558e64",7:"#005fcc",8:"#ce382d",9:"#f2f4f3",10:"#57c2e4",11:"#a9e0e9",
+  12:"#dfe8eb",13:"#98a3bf",14:"#e1c9bb",15:"#d6ad7b",16:"#fdec9a",17:"#e8b73a",
+  18:"#226d22",19:"#0c625d",20:"#538e4b",21:"#139626",22:"#206e23",23:"#269c31",
+  24:"#0045a5",25:"#938c8c",26:"#bcdbd2",27:"#25b12b",28:"#06a906",29:"#276031",
+  30:"#00605d",31:"#024344",32:"#2b7631",33:"#1e5a20",34:"#649460",35:"#c8b615",
+  36:"#b6a605",37:"#c66631",38:"#c6541a",39:"#ab3c11",40:"#846fb2",41:"#a892d0",
+  42:"#ccbcef",43:"#6b598f",44:"#28a8dc",45:"#1985ca",
+  46:"#176ba5",47:"#074a9a",48:"#03357c",49:"#012660",50:"#021d4b",
+  51:"#59a739",52:"#339241",53:"#93b455",127:"#080808",
+  129:"#a4d34f",130:"#eab131",131:"#64845e",132:"#1ea623",133:"#0a6859",134:"#4c8161",
+  140:"#a6afc7",149:"#19a923",151:"#26992e",155:"#1ace22",156:"#05c508",157:"#216322",
+  158:"#024d4b",160:"#3d7f3e",161:"#2a7530",162:"#528150",163:"#d9c811",164:"#beb708",
+  165:"#dd6523",166:"#bc5016",167:"#a9330c",168:"#26c929",169:"#189e1e",170:"#6a3e11",
+  171:"#a81d1d",172:"#176e6b",173:"#414258",174:"#528641",175:"#23ac6c",177:"#6cba3b",
+  178:"#55a652",179:"#e2ebed",180:"#cedce7",181:"#bdcedb",182:"#869f83",183:"#1c1c36",
+  184:"#288458",185:"#fcacc2",186:"#dde5e8",187:"#dcb40a"
 };
 const BIOME_RGB = new Map(Object.entries(BIOME_COLORS).map(([id, hex]) => [Number(id), hexToRgb(hex)]));
+const WATER_BIOMES = new Set([0, 7, 10, 11, 24, 44, 45, 46, 47, 48, 49, 50]);
+const DEEP_WATER_BIOMES = new Set([24, 47, 48, 49, 50]);
+const BEACH_BIOMES = new Set([16, 26]);
+const SAND_BIOMES = new Set([2, 16, 17, 26, 130]);
+const FOREST_BIOMES = new Set([4, 18, 21, 27, 28, 29, 32, 33, 132, 155, 156, 157, 168, 169, 185]);
+const BIOME_TILE_RENDER_SCALE = 1;
 
 function hexToRgb(hex) {
   const value = parseInt(hex.slice(1), 16);
@@ -34,8 +39,132 @@ function terrainNoise(x, z) {
   return ((v >>> 0) % 1000) / 1000;
 }
 
-function tintBiome(rgb, x, z, biomeId) {
-  return (rgb[0] << 16) | (rgb[1] << 8) | rgb[2];
+function smoothTerrainNoise(x, z) {
+  const center = terrainNoise(x, z) * 4;
+  const edges =
+    terrainNoise(x - 1, z) +
+    terrainNoise(x + 1, z) +
+    terrainNoise(x, z - 1) +
+    terrainNoise(x, z + 1);
+  const corners =
+    terrainNoise(x - 1, z - 1) +
+    terrainNoise(x + 1, z - 1) +
+    terrainNoise(x - 1, z + 1) +
+    terrainNoise(x + 1, z + 1);
+  return (center + edges * 2 + corners) / 16;
+}
+
+function clamp01(v) {
+  return Math.max(0, Math.min(1, v));
+}
+
+function mixChannel(a, b, t) {
+  return a + (b - a) * t;
+}
+
+function stylizedBiomeRgb(rgb, worldX, worldZ, biomeId) {
+  const n1 = smoothTerrainNoise(worldX >> 5, worldZ >> 5) - 0.5;
+  const n2 = smoothTerrainNoise(worldX >> 8, worldZ >> 8) - 0.5;
+  const n3 = smoothTerrainNoise(worldX >> 3, worldZ >> 3) - 0.5;
+  let r = rgb[0], g = rgb[1], b = rgb[2];
+  let contrast = 1 + n1 * 0.08 + n2 * 0.06;
+  let lift = n2 * 5 + n3 * 2;
+
+  if (WATER_BIOMES.has(biomeId)) {
+    contrast = 1 + n1 * 0.055;
+    lift = DEEP_WATER_BIOMES.has(biomeId) ? -10 + n2 * 4 : 2 + n2 * 4;
+    r = mixChannel(r, 18, 0.24);
+    g = mixChannel(g, 122, 0.18);
+    b = mixChannel(b, 205, 0.18);
+  } else if (SAND_BIOMES.has(biomeId)) {
+    r = mixChannel(r, 242, 0.24);
+    g = mixChannel(g, 215, 0.18);
+    b = mixChannel(b, 126, 0.10);
+    contrast = 1 + n1 * 0.06;
+    lift += 6;
+  } else if (FOREST_BIOMES.has(biomeId)) {
+    r = mixChannel(r, 52, 0.16);
+    g = mixChannel(g, 118, 0.16);
+    b = mixChannel(b, 56, 0.10);
+    lift -= 3;
+    contrast = 1 + n1 * 0.10 + n2 * 0.06;
+  } else {
+    r = mixChannel(r, 134, 0.08);
+    g = mixChannel(g, 174, 0.10);
+    b = mixChannel(b, 78, 0.08);
+  }
+
+  return [
+    Math.max(0, Math.min(255, r * contrast + lift)),
+    Math.max(0, Math.min(255, g * contrast + lift)),
+    Math.max(0, Math.min(255, b * contrast + lift))
+  ];
+}
+
+function nearbyBiome(grid, s, x, z, predicate) {
+  if (x > 0 && predicate(grid[z * s + x - 1])) return true;
+  if (x + 1 < s && predicate(grid[z * s + x + 1])) return true;
+  if (z > 0 && predicate(grid[(z - 1) * s + x])) return true;
+  if (z + 1 < s && predicate(grid[(z + 1) * s + x])) return true;
+  return false;
+}
+
+function nearbyBiomeDistance(grid, s, x, z, predicate, maxRadius) {
+  for (let radius = 1; radius <= maxRadius; radius++) {
+    for (let dz = -radius; dz <= radius; dz++) {
+      const nz = z + dz;
+      if (nz < 0 || nz >= s) continue;
+      for (let dx = -radius; dx <= radius; dx++) {
+        if (Math.abs(dx) !== radius && Math.abs(dz) !== radius) continue;
+        const nx = x + dx;
+        if (nx < 0 || nx >= s) continue;
+        if (predicate(grid[nz * s + nx])) return radius;
+      }
+    }
+  }
+  return 0;
+}
+
+function biomeEdgeStrength(grid, s, x, z, id) {
+  let edge = 0;
+  if (x > 0 && grid[z * s + x - 1] !== id) edge++;
+  if (x + 1 < s && grid[z * s + x + 1] !== id) edge++;
+  if (z > 0 && grid[(z - 1) * s + x] !== id) edge++;
+  if (z + 1 < s && grid[(z + 1) * s + x] !== id) edge++;
+  return Math.min(1, edge / 3);
+}
+
+function applyStylizedBiomePixel(pixels, j, rgb, grid, s, x, z, worldX, worldZ, biomeId) {
+  const water = WATER_BIOMES.has(biomeId);
+  const waterDist = nearbyBiomeDistance(grid, s, x, z, id => WATER_BIOMES.has(id), 3);
+  const landDist = nearbyBiomeDistance(grid, s, x, z, id => !WATER_BIOMES.has(id), 3);
+  const besideWater = waterDist > 0;
+  const besideLand = landDist > 0;
+  let [r, g, b] = stylizedBiomeRgb(rgb, worldX, worldZ, biomeId);
+
+  if (water && besideLand) {
+    const t = landDist === 1 ? 0.38 : landDist === 2 ? 0.22 : 0.12;
+    r = mixChannel(r, 72, t);
+    g = mixChannel(g, 190, t);
+    b = mixChannel(b, 224, t * 0.9);
+  } else if (!water && besideWater) {
+    const shore = waterDist === 1 ? 0.36 : waterDist === 2 ? 0.2 : 0.1;
+    const beachTint = BEACH_BIOMES.has(biomeId) || SAND_BIOMES.has(biomeId) ? shore * 1.2 : shore;
+    r = mixChannel(r, 238, beachTint);
+    g = mixChannel(g, 211, beachTint * 0.95);
+    b = mixChannel(b, 128, beachTint * 0.62);
+  }
+
+  const edge = biomeEdgeStrength(grid, s, x, z, biomeId);
+  if (edge && !water) {
+    const shade = 1 - edge * 0.07;
+    r *= shade; g *= shade; b *= shade;
+  }
+
+  pixels[j] = r;
+  pixels[j + 1] = g;
+  pixels[j + 2] = b;
+  pixels[j + 3] = 255;
 }
 
 function decodeBiomeGrid(data) {
@@ -46,6 +175,94 @@ function decodeBiomeGrid(data) {
   data.grid = grid;
   data.gridEncoding = "u8";
   return data;
+}
+
+function decodeHeightGrid(data) {
+  if (data?.gridEncoding !== "f32-b64" || typeof data.grid !== "string") return data;
+  const raw = atob(data.grid);
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  data.grid = new Float32Array(bytes.buffer);
+  data.gridEncoding = "f32";
+  return data;
+}
+
+// Relief-shading light, fixed direction from the northwest. Flat ground
+// renders as neutral mid-gray so an 'overlay' blend leaves it unchanged;
+// slopes facing the light brighten, slopes away from it darken.
+const HILLSHADE_LIGHT = { x: -0.68, z: -0.54, y: 0.52 };
+// Gamma curve instead of a flat multiplier: gentle slopes (rolling plains,
+// where the real elevation change is only a couple of blocks) get boosted
+// disproportionately so they still show visible texture, while already-steep
+// slopes (mountains) aren't pushed further into saturation.
+const HILLSHADE_GAIN = 82;
+const HILLSHADE_GAMMA = 0.58;
+// mapApproxHeight is an approximation, not real terrain — it has occasional
+// single-sample spikes (e.g. at biome/ocean edges) that would otherwise
+// blow out to pure black/white. Smoothing + a slope clamp keeps those from
+// dominating the shading.
+const HILLSHADE_MAX_SLOPE = 1.05;
+
+function smoothedHeight(grid, s, x, z) {
+  let sum = 0;
+  for (let dz = -1; dz <= 1; dz++) {
+    const row = (z + dz) * s;
+    sum += grid[row + x - 1] + grid[row + x] + grid[row + x + 1];
+  }
+  return sum / 9;
+}
+
+function clampSlope(v) {
+  return Math.max(-HILLSHADE_MAX_SLOPE, Math.min(HILLSHADE_MAX_SLOPE, v));
+}
+
+function clampByte(v) {
+  return Math.max(0, Math.min(255, Math.round(v)));
+}
+
+// `grid` is padded with a 2-sample halo (paddedSamples = inner + 4): one ring
+// so the 3x3 smoothing has real neighbors at the tile edge, and one more so
+// the gradient afterwards does too. Without it, adjacent tiles' shading would
+// disagree right at the boundary (a visible seam).
+function buildHillshadeBitmap(grid, paddedSamples, scale) {
+  const inner = paddedSamples - 4;
+  if (typeof OffscreenCanvas === "undefined" || inner < 2) return null;
+  const canvas = new OffscreenCanvas(inner, inner);
+  const ctx = canvas.getContext("2d", { alpha: false });
+  if (!ctx) return null;
+  const L = HILLSHADE_LIGHT;
+  const lightLen = Math.hypot(L.x, L.z, L.y);
+  const lx = L.x / lightLen, lz = L.z / lightLen, ly = L.y / lightLen;
+  const baseDot = ly; // dot product for flat ground (normal = 0,0,1)
+  const img = ctx.createImageData(inner, inner);
+  const data = img.data;
+  for (let z = 2; z < 2 + inner; z++) {
+    for (let x = 2; x < 2 + inner; x++) {
+      const hL = smoothedHeight(grid, paddedSamples, x - 1, z);
+      const hR = smoothedHeight(grid, paddedSamples, x + 1, z);
+      const hU = smoothedHeight(grid, paddedSamples, x, z - 1);
+      const hD = smoothedHeight(grid, paddedSamples, x, z + 1);
+      const dHx = clampSlope((hR - hL) / (2 * scale));
+      const dHz = clampSlope((hD - hU) / (2 * scale));
+      const nLen = Math.hypot(dHx, dHz, 1);
+      const nx = -dHx / nLen, nz = -dHz / nLen, ny = 1 / nLen;
+      const dot = nx * lx + nz * lz + ny * ly;
+      const raw = dot - baseDot;
+      const shade = Math.sign(raw) * Math.pow(Math.abs(raw), HILLSHADE_GAMMA) * HILLSHADE_GAIN;
+      const terrace = Math.abs((smoothedHeight(grid, paddedSamples, x, z) % 12) - 6);
+      const gray = 128 + shade - Math.max(0, 2.8 - terrace) * 1.6;
+      // Warm highlight on lit slopes, cool shadow on the rest — a flat gray
+      // hillshade reads as fog; a slight color split reads as sunlight.
+      const tint = shade > 0 ? shade * 0.14 : shade * 0.20;
+      const i = ((z - 2) * inner + (x - 2)) * 4;
+      data[i] = clampByte(gray + tint + (shade > 0 ? 3 : 0));
+      data[i + 1] = clampByte(gray + tint * 0.32 + (shade > 0 ? 2 : 0));
+      data[i + 2] = clampByte(gray - tint - (shade < 0 ? 3 : 0));
+      data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return canvas.transferToImageBitmap();
 }
 
 function attachBiomeBitmap(data, payload) {
@@ -64,15 +281,79 @@ function attachBiomeBitmap(data, payload) {
     const lx = i % s;
     const lz = Math.floor(i / s);
     const biomeId = data.grid[i];
-    const color = tintBiome(BIOME_RGB.get(biomeId) || UNKNOWN_BIOME_RGB, (baseX + lx * scale) >> 4, (baseZ + lz * scale) >> 4, biomeId);
     const j = i * 4;
-    pixels[j] = (color >> 16) & 255;
-    pixels[j + 1] = (color >> 8) & 255;
-    pixels[j + 2] = color & 255;
-    pixels[j + 3] = 255;
+    applyStylizedBiomePixel(
+      pixels,
+      j,
+      BIOME_RGB.get(biomeId) || UNKNOWN_BIOME_RGB,
+      data.grid,
+      s,
+      lx,
+      lz,
+      baseX + lx * scale,
+      baseZ + lz * scale,
+      biomeId
+    );
   }
   ctx.putImageData(img, 0, 0);
-  data.bitmap = canvas.transferToImageBitmap();
+  const out = upscaleBiomeCanvas(canvas, s, BIOME_TILE_RENDER_SCALE);
+  data.bitmap = out.transferToImageBitmap();
+}
+
+function upscaleBiomeCanvas(source, samples, scale) {
+  if (scale <= 1) return source;
+  const sourceCtx = source.getContext("2d", { alpha: false });
+  if (!sourceCtx) return source;
+  const sourceData = sourceCtx.getImageData(0, 0, samples, samples).data;
+  const size = samples * scale;
+  const out = new OffscreenCanvas(size, size);
+  const outCtx = out.getContext("2d", { alpha: false });
+  if (!outCtx) return source;
+  const outImg = outCtx.createImageData(size, size);
+  const outData = outImg.data;
+  for (let y = 0; y < size; y++) {
+    const sy = (y + 0.5) / scale - 0.5;
+    const y0 = Math.max(0, Math.min(samples - 1, Math.floor(sy)));
+    const y1 = Math.max(0, Math.min(samples - 1, y0 + 1));
+    const ty = sy <= 0 || y0 === y1 ? 0 : sy - y0;
+    for (let x = 0; x < size; x++) {
+      const sx = (x + 0.5) / scale - 0.5;
+      const x0 = Math.max(0, Math.min(samples - 1, Math.floor(sx)));
+      const x1 = Math.max(0, Math.min(samples - 1, x0 + 1));
+      const tx = sx <= 0 || x0 === x1 ? 0 : sx - x0;
+      const i00 = (y0 * samples + x0) * 4;
+      const i10 = (y0 * samples + x1) * 4;
+      const i01 = (y1 * samples + x0) * 4;
+      const i11 = (y1 * samples + x1) * 4;
+      const outI = (y * size + x) * 4;
+      for (let c = 0; c < 3; c++) {
+        const top = sourceData[i00 + c] + (sourceData[i10 + c] - sourceData[i00 + c]) * tx;
+        const bottom = sourceData[i01 + c] + (sourceData[i11 + c] - sourceData[i01 + c]) * tx;
+        outData[outI + c] = top + (bottom - top) * ty;
+      }
+      outData[outI + 3] = 255;
+    }
+  }
+  softenBiomePixels(outData, size);
+  outCtx.putImageData(outImg, 0, 0);
+  return out;
+}
+
+function softenBiomePixels(data, size) {
+  const copy = new Uint8ClampedArray(data);
+  for (let y = 1; y < size - 1; y++) {
+    for (let x = 1; x < size - 1; x++) {
+      const i = (y * size + x) * 4;
+      const n = ((y - 1) * size + x) * 4;
+      const s = ((y + 1) * size + x) * 4;
+      const w = (y * size + x - 1) * 4;
+      const e = (y * size + x + 1) * 4;
+      for (let c = 0; c < 3; c++) {
+        const avg = (copy[i + c] * 4 + copy[n + c] + copy[s + c] + copy[w + c] + copy[e + c]) / 8;
+        data[i + c] = copy[i + c] * 0.58 + avg * 0.42;
+      }
+    }
+  }
 }
 
 async function getJson(path, signal) {
@@ -115,6 +396,20 @@ self.onmessage = async event => {
       data = await getJson(`/api/biomes?${params}`, controller?.signal);
       decodeBiomeGrid(data);
       attachBiomeBitmap(data, payload);
+    } else if (type === "heightTile") {
+      const params = new URLSearchParams({
+        seed: payload.seed,
+        version: payload.version,
+        x: String(payload.x),
+        z: String(payload.z),
+        w: String(payload.w),
+        h: String(payload.h),
+        scale: String(payload.scale),
+        format: "f32"
+      });
+      data = await getJson(`/api/heights?${params}`, controller?.signal);
+      decodeHeightGrid(data);
+      if (data?.grid) data.shadeBitmap = buildHillshadeBitmap(data.grid, Number(payload.w), Number(payload.scale));
     } else if (type === "structures") {
       const params = new URLSearchParams({
         seed: payload.seed,
@@ -175,7 +470,10 @@ self.onmessage = async event => {
     } else {
       throw new Error(`Unknown worker task: ${type}`);
     }
-    const transfer = data?.bitmap ? [data.bitmap] : [];
+    const transfer = [];
+    if (data?.bitmap) transfer.push(data.bitmap);
+    if (data?.shadeBitmap) transfer.push(data.shadeBitmap);
+    if (data?.grid instanceof Float32Array) transfer.push(data.grid.buffer);
     self.postMessage({ id, ok: true, data }, transfer);
   } catch (err) {
     self.postMessage({ id, ok: false, error: err.message || "Worker request failed" });
