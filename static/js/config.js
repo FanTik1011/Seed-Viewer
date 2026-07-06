@@ -17,6 +17,7 @@ const MAX_TILE_REQUESTS = SERVER_PERF_MODE
 const MAX_DRAW_TILES = SERVER_PERF_MODE ? 220 : 300;
 const MAX_HEIGHT_TILE_CACHE = SERVER_PERF_MODE ? 260 : 500;
 const MAX_HEIGHT_REQUESTS = SERVER_PERF_MODE ? 1 : IS_LOCAL_HOST ? 4 : 3;
+const DEFER_INITIAL_STRUCTURES = SERVER_PERF_MODE;
 // Height/hillshade resolution adapts to zoom: full detail (matching the
 // biome grid) when zoomed in close enough to actually see it, coarser (and
 // cheaper) once tiles are small on screen and the extra detail would just be
@@ -33,7 +34,7 @@ const HEIGHT_SAMPLE_DIV_TIERS = SERVER_PERF_MODE ? [
 const CONTOUR_INTERVAL = SERVER_PERF_MODE ? 18 : 12;
 const TILE_REQUEST_TIMEOUT = IS_HEROKU ? 24000 : IS_LOCAL_HOST ? 12000 : 18000;
 
-const STRUCT_REQUEST_TIMEOUT = 15000;
+const STRUCT_REQUEST_TIMEOUT = SERVER_PERF_MODE ? 22000 : 15000;
 const MAX_TILE_ATTEMPTS = 3;
 const TILE_RETRY_PENALTY = 5500;
 const TILE_RETRY_BASE_DELAY = IS_LOCAL_HOST ? 450 : 500;
@@ -63,7 +64,7 @@ const STRUCT_BULK_MAX_RADIUS = SERVER_PERF_MODE ? 2304 : 3072;
 const STRUCT_VIEW_BUFFER = SERVER_PERF_MODE ? 512 : 768;
 const MAX_STREAM_MARKERS = SERVER_PERF_MODE ? 2200 : 3500;
 const STRUCT_KEEP_RADIUS = 2;          
-const STRUCT_DEFER_DELAY = SERVER_PERF_MODE ? 240 : 140;
+const STRUCT_DEFER_DELAY = SERVER_PERF_MODE ? 420 : 140;
 const STRUCT_FAST_TYPES = [
   "Village", "Mansion", "Monument", "Outpost",
   "Desert_Temple", "Jungle_Temple", "Witch_Hut", "Igloo"
