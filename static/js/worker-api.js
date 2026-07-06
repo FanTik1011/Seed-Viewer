@@ -60,7 +60,7 @@ function cancelWorkerJob(id, reason = "Request canceled") {
 
 function cancelWorldWorkerJobs() {
   for (const [id, job] of [...workerJobs]) {
-    if (job.type === "biomeTile" || job.type === "heightTile" || job.type === "structures" || job.type === "structureType" || job.type === "findBiome") {
+    if (job.type === "biomeTile" || job.type === "structures" || job.type === "structureType" || job.type === "findBiome") {
       cancelWorkerJob(id, "World changed");
     }
   }
@@ -73,16 +73,6 @@ function decodeBiomeGrid(data) {
   for (let i = 0; i < raw.length; i++) grid[i] = raw.charCodeAt(i);
   data.grid = grid;
   data.gridEncoding = "u8";
-  return data;
-}
-
-function decodeHeightGrid(data) {
-  if (data?.gridEncoding !== "f32-b64" || typeof data.grid !== "string") return data;
-  const raw = atob(data.grid);
-  const bytes = new Uint8Array(raw.length);
-  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
-  data.grid = new Float32Array(bytes.buffer);
-  data.gridEncoding = "f32";
   return data;
 }
 
@@ -101,18 +91,6 @@ async function directRequest(type, payload = {}, signal = undefined) {
       format: "u8"
     });
     url = `${API}/api/biomes?${params}`;
-  } else if (type === "heightTile") {
-    const params = new URLSearchParams({
-      seed: payload.seed,
-      version: payload.version,
-      x: String(payload.x),
-      z: String(payload.z),
-      w: String(payload.w),
-      h: String(payload.h),
-      scale: String(payload.scale),
-      format: "f32"
-    });
-    url = `${API}/api/heights?${params}`;
   } else if (type === "structures") {
     const params = new URLSearchParams({
       seed: payload.seed,
@@ -175,6 +153,5 @@ async function directRequest(type, payload = {}, signal = undefined) {
   const data = await response.json();
   if (!response.ok || data.error) throw new Error(data.error || "Request failed");
   if (type === "biomeTile") decodeBiomeGrid(data);
-  if (type === "heightTile") decodeHeightGrid(data);
   return data;
 }
