@@ -388,9 +388,12 @@ function rebuildBiomeTileCanvases() {
 
 // Water/void biomes stay flat-shaded so oceans read as smooth rather than noisy.
 const RELIEF_FLAT_BIOMES = new Set([0, 7, 10, 11, 24, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 127]);
-// Lattice spacing for the fake heightmap, in chunks (broad hills + finer detail octave).
-const RELIEF_CELL = 7;
-const RELIEF_CELL_FINE = 3;
+// Lattice spacing for the fake heightmap, in chunks (broad hills + finer
+// detail octave). A single bilinear-noise octave alone looks like a grid of
+// perfectly round "bullseye" bumps — both terrainHeight and contourHeight
+// blend in the fine octave (contourHeight more lightly) to break that up.
+const RELIEF_CELL = 9;
+const RELIEF_CELL_FINE = 4;
 
 function latticeNoise(gx, gz, salt) {
   let v = Math.imul((gx + salt) ^ 0x27d4eb2d, 0x85ebca6b) ^ Math.imul((gz - salt) ^ 0xc2b2ae35, 0x165667b1);
@@ -423,23 +426,26 @@ function latticeHeight(cx, cz, cell, salt) {
 // blended together give rolling terrain instead of per-block static.
 // Coordinates are chunk-scale (world >> 4).
 function terrainHeight(cx, cz) {
-  return latticeHeight(cx, cz, RELIEF_CELL, 0) * 0.7 + latticeHeight(cx, cz, RELIEF_CELL_FINE, 97) * 0.3;
+  return latticeHeight(cx, cz, RELIEF_CELL, 0) * 0.72 + latticeHeight(cx, cz, RELIEF_CELL_FINE, 97) * 0.28;
 }
 
-// Contour lines (see buildReliefTile below) trace only the broad octave, not
-// the fine detail — otherwise every little bump adds its own ring and the
-// lines turn into dense hatching instead of a few clean sweeping curves.
+// Contour lines (see buildReliefTile below) lean much more heavily on the
+// broad octave than the pixel shading does — enough fine detail to avoid the
+// single-octave "bullseye" look, but not so much that lines turn into dense
+// hatching.
 function contourHeight(cx, cz) {
-  return latticeHeight(cx, cz, RELIEF_CELL, 0);
+  return latticeHeight(cx, cz, RELIEF_CELL, 0) * 0.85 + latticeHeight(cx, cz, RELIEF_CELL_FINE, 97) * 0.15;
 }
 
-// Hypsometric tint targets: nudge the biome color toward a cool, shadowed
-// tone in low ground and a warm, sunlit tone on high ground (the classic
-// elevation-tint look on real relief maps).
-const RELIEF_LOWLAND_R = 14, RELIEF_LOWLAND_G = 34, RELIEF_LOWLAND_B = 28;
-const RELIEF_HIGHLAND_R = 236, RELIEF_HIGHLAND_G = 226, RELIEF_HIGHLAND_B = 196;
+// Hypsometric color ramp: a light elevation-based tint (green low, tan/khaki
+// mid, gray/white high) layered on top of the biome color, not replacing it.
+// mcseedmap (and Amidst, whose palette BIOME_COLORS now uses) keep biome
+// color as the primary signal and treat terrain/contour as a secondary
+// overlay — a high RELIEF_TINT_WEIGHT here washed every biome into the same
+// look, which is exactly what looked "broken".
+const RELIEF_TINT_WEIGHT = 0.3;
 
-// Hillshade + hypsometric tint from the fake heightmap. The topographic
+// Hillshade + hypsometric ramp from the fake heightmap. The topographic
 // contour lines are drawn separately as a vector overlay (see
 // buildReliefTile/drawReliefContours) so this only needs to do slope
 // lighting, not its own banding. Written as scalar math with no intermediate
@@ -454,17 +460,27 @@ function tintBiome(rgb, cx, cz, biomeId) {
     let light = 1 + (h - hx) * 2.9 + (h - hz) * 2.1;
     light = light < 0.42 ? 0.42 : light > 1.4 ? 1.4 : light;
 
-    if (h > 0.62) {
-      const t = Math.min(1, (h - 0.62) / 0.3) * 0.42;
-      r += (RELIEF_HIGHLAND_R - r) * t;
-      g += (RELIEF_HIGHLAND_G - g) * t;
-      b += (RELIEF_HIGHLAND_B - b) * t;
-    } else if (h < 0.32) {
-      const t = Math.min(1, (0.32 - h) / 0.3) * 0.32;
-      r += (RELIEF_LOWLAND_R - r) * t;
-      g += (RELIEF_LOWLAND_G - g) * t;
-      b += (RELIEF_LOWLAND_B - b) * t;
+    let rr, rg, rb;
+    if (h < 0.28) {
+      const t = h / 0.28;
+      rr = 46 + (132 - 46) * t; rg = 74 + (156 - 74) * t; rb = 44 + (92 - 44) * t;
+    } else if (h < 0.46) {
+      const t = (h - 0.28) / 0.18;
+      rr = 132 + (196 - 132) * t; rg = 156 + (182 - 156) * t; rb = 92 + (132 - 92) * t;
+    } else if (h < 0.64) {
+      const t = (h - 0.46) / 0.18;
+      rr = 196 + (180 - 196) * t; rg = 182 + (168 - 182) * t; rb = 132 + (146 - 132) * t;
+    } else if (h < 0.8) {
+      const t = (h - 0.64) / 0.16;
+      rr = 180 + (206 - 180) * t; rg = 168 + (206 - 168) * t; rb = 146 + (202 - 146) * t;
+    } else {
+      const t = Math.min(1, (h - 0.8) / 0.2);
+      rr = 206 + (240 - 206) * t; rg = 206 + (240 - 206) * t; rb = 202 + (238 - 202) * t;
     }
+
+    r = r + (rr - r) * RELIEF_TINT_WEIGHT;
+    g = g + (rg - g) * RELIEF_TINT_WEIGHT;
+    b = b + (rb - b) * RELIEF_TINT_WEIGHT;
     r *= light; g *= light; b *= light;
   }
   return (clamp8(r) << 16) | (clamp8(g) << 8) | clamp8(b);

@@ -1,25 +1,28 @@
 const API = self.location.pathname.replace(/\/static\/seed-worker\.js$/, "");
 const controllers = new Map();
 const UNKNOWN_BIOME_RGB = [38, 45, 41];
+// Official cubiomes biome colors (cubiomes/util.c initBiomeColors), the same
+// palette mcseedmap.net credits as its source — in turn based on Amidst's
+// biome color table, tuned for clear contrast between neighboring biomes
+// rather than raw vanilla map-item colors.
 const BIOME_COLORS = {
-  0:"#000070",1:"#8DB360",2:"#FA9418",3:"#606060",4:"#056621",5:"#0B6659",
-  6:"#07F9B2",7:"#0000FF",8:"#BF3B3B",9:"#8080FF",10:"#7070D6",11:"#A0A0FF",
+  0:"#000070",1:"#8DB360",2:"#FA9418",3:"#606060",4:"#056621",5:"#0B6A5F",
+  6:"#07F9B2",7:"#0000FF",8:"#572526",9:"#8080FF",10:"#7070D6",11:"#A0A0FF",
   12:"#FFFFFF",13:"#A0A0A0",14:"#FF00FF",15:"#A000FF",16:"#FADE55",17:"#D25F12",
-  18:"#22551C",19:"#163933",20:"#72789A",21:"#537B09",22:"#2C4205",23:"#628B17",
+  18:"#22551C",19:"#163933",20:"#72789A",21:"#507B0A",22:"#2C4205",23:"#60930F",
   24:"#000030",25:"#A2A284",26:"#FAF0C0",27:"#307444",28:"#1F5F32",29:"#40511A",
-  30:"#31554A",31:"#243F36",32:"#596651",33:"#454F3E",34:"#507050",35:"#BDB25F",
-  36:"#A79D64",37:"#D94515",38:"#B09765",39:"#CA8C65",40:"#8080FF",41:"#8080FF",
-  42:"#8080FF",43:"#8080FF",44:"#0000AC",45:"#000090",46:"#202070",47:"#000050",
-  48:"#000040",49:"#202038",50:"#404090",51:"#8FA35A",52:"#1F8F4A",53:"#7F8F4A",
-  127:"#000000",129:"#B5DB88",130:"#FFBC40",
-  131:"#888888",132:"#2D8E49",133:"#338E81",134:"#2FFFDA",140:"#B4DCDC",
-  149:"#7BA331",151:"#8AB33F",155:"#589C6C",156:"#47875A",157:"#687942",
-  158:"#597D72",160:"#818E79",161:"#6D7766",162:"#789878",163:"#E5DA87",
-  164:"#CFC58C",165:"#FF6D3D",166:"#D8BF8D",167:"#F2B48D",168:"#768E14",
-  169:"#3B470A",170:"#5E3830",171:"#DD0808",172:"#49907B",173:"#403636",
-  174:"#507050",175:"#59C93C",177:"#60A445",178:"#47783E",179:"#FFFFFF",
-  180:"#B0B0B0",181:"#D8D8D8",182:"#A2A284",183:"#303050",184:"#2F6F50",
-  185:"#F7B2C4",186:"#C9D6C9"
+  30:"#31554A",31:"#243F36",32:"#596651",33:"#454F3E",34:"#5B7352",35:"#BDB25F",
+  36:"#A79D64",37:"#D94515",38:"#B09765",39:"#CA8C65",40:"#4B4BAB",41:"#C9C959",
+  42:"#B5B536",43:"#7070CC",44:"#0000AC",45:"#000090",46:"#202070",47:"#000050",
+  48:"#000040",49:"#202038",50:"#404090",51:"#2F560F",52:"#47840E",53:"#789E31",
+  127:"#000000",129:"#B5DB88",130:"#FFBC40",131:"#888888",132:"#2D8E49",
+  133:"#339287",134:"#2FFFDA",140:"#B4DCDC",149:"#78A332",151:"#88BB37",
+  155:"#589C6C",156:"#47875A",157:"#687942",158:"#597D72",160:"#818E79",
+  161:"#6D7766",162:"#839B7A",163:"#E5DA87",164:"#CFC58C",165:"#FF6D3D",
+  166:"#D8BF8D",167:"#F2B48D",168:"#849500",169:"#5C6C04",170:"#4D3A2E",
+  171:"#981A11",172:"#49907B",173:"#645F63",174:"#4E3012",175:"#283C00",
+  177:"#60A445",178:"#47726C",179:"#C4C4C4",180:"#DCDCC8",181:"#B0B3CE",
+  182:"#7B8F74",183:"#031F29",184:"#2CCC8E",185:"#FF91C8",186:"#696D95"
 };
 function hexToRgb(hex) {
   const value = parseInt(hex.slice(1), 16);
@@ -30,13 +33,15 @@ function clamp8(v) {
   return v < 0 ? 0 : v > 255 ? 255 : v | 0;
 }
 
-// Push each biome color toward richer saturation and slightly higher
-// brightness once at load time, so per-pixel rendering only has to do a
-// cheap multiply (see tintBiome) instead of repeating this math per pixel.
+// A light saturation/brightness lift once at load time, so per-pixel
+// rendering only has to do a cheap multiply (see tintBiome) instead of
+// repeating this math per pixel. Kept subtle now that BIOME_COLORS is the
+// cubiomes/Amidst palette, which is already tuned for contrast — boosting it
+// hard (like a raw vanilla palette needs) would just wash it out.
 function vividRgb([r, g, b]) {
   const avg = (r + g + b) / 3;
-  const sat = 1.28;
-  const bright = 1.08;
+  const sat = 1.1;
+  const bright = 1.03;
   return [
     clamp8((avg + (r - avg) * sat) * bright),
     clamp8((avg + (g - avg) * sat) * bright),
@@ -48,9 +53,12 @@ const BIOME_RGB = new Map(Object.entries(BIOME_COLORS).map(([id, hex]) => [Numbe
 
 // Water/void biomes stay flat-shaded so oceans read as smooth rather than noisy.
 const RELIEF_FLAT_BIOMES = new Set([0, 7, 10, 11, 24, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 127]);
-// Lattice spacing for the fake heightmap, in chunks (broad hills + finer detail octave).
-const RELIEF_CELL = 7;
-const RELIEF_CELL_FINE = 3;
+// Lattice spacing for the fake heightmap, in chunks (broad hills + finer
+// detail octave). A single bilinear-noise octave alone looks like a grid of
+// perfectly round "bullseye" bumps — blending in the fine octave breaks
+// that up (see terrainHeight below).
+const RELIEF_CELL = 9;
+const RELIEF_CELL_FINE = 4;
 
 function latticeNoise(gx, gz, salt) {
   let v = Math.imul((gx + salt) ^ 0x27d4eb2d, 0x85ebca6b) ^ Math.imul((gz - salt) ^ 0xc2b2ae35, 0x165667b1);
@@ -84,16 +92,18 @@ function latticeHeight(cx, cz, cell, salt) {
 // Coordinates are chunk-scale (world >> 4). This runs once per fetched tile
 // (not per animation frame), so it stays cheap even on slow hosts like Heroku.
 function terrainHeight(cx, cz) {
-  return latticeHeight(cx, cz, RELIEF_CELL, 0) * 0.7 + latticeHeight(cx, cz, RELIEF_CELL_FINE, 97) * 0.3;
+  return latticeHeight(cx, cz, RELIEF_CELL, 0) * 0.72 + latticeHeight(cx, cz, RELIEF_CELL_FINE, 97) * 0.28;
 }
 
-// Hypsometric tint targets: nudge the biome color toward a cool, shadowed
-// tone in low ground and a warm, sunlit tone on high ground (the classic
-// elevation-tint look on real relief maps).
-const RELIEF_LOWLAND_R = 14, RELIEF_LOWLAND_G = 34, RELIEF_LOWLAND_B = 28;
-const RELIEF_HIGHLAND_R = 236, RELIEF_HIGHLAND_G = 226, RELIEF_HIGHLAND_B = 196;
+// Hypsometric color ramp: a light elevation-based tint (green low, tan/khaki
+// mid, gray/white high) layered on top of the biome color, not replacing it.
+// mcseedmap (and Amidst, whose palette BIOME_COLORS now uses) keep biome
+// color as the primary signal and treat terrain/contour as a secondary
+// overlay — a high RELIEF_TINT_WEIGHT here washed every biome into the same
+// look, which is exactly what looked "broken".
+const RELIEF_TINT_WEIGHT = 0.3;
 
-// Hillshade + hypsometric tint from the fake heightmap. The topographic
+// Hillshade + hypsometric ramp from the fake heightmap. The topographic
 // contour lines are drawn separately as a vector overlay on the main thread
 // (see tile-stream.js), so this only needs to do slope lighting, not its own
 // banding. Written as scalar math with no intermediate objects/arrays (this
@@ -108,17 +118,27 @@ function tintBiome(rgb, cx, cz, biomeId) {
     let light = 1 + (h - hx) * 2.9 + (h - hz) * 2.1;
     light = light < 0.42 ? 0.42 : light > 1.4 ? 1.4 : light;
 
-    if (h > 0.62) {
-      const t = Math.min(1, (h - 0.62) / 0.3) * 0.42;
-      r += (RELIEF_HIGHLAND_R - r) * t;
-      g += (RELIEF_HIGHLAND_G - g) * t;
-      b += (RELIEF_HIGHLAND_B - b) * t;
-    } else if (h < 0.32) {
-      const t = Math.min(1, (0.32 - h) / 0.3) * 0.32;
-      r += (RELIEF_LOWLAND_R - r) * t;
-      g += (RELIEF_LOWLAND_G - g) * t;
-      b += (RELIEF_LOWLAND_B - b) * t;
+    let rr, rg, rb;
+    if (h < 0.28) {
+      const t = h / 0.28;
+      rr = 46 + (132 - 46) * t; rg = 74 + (156 - 74) * t; rb = 44 + (92 - 44) * t;
+    } else if (h < 0.46) {
+      const t = (h - 0.28) / 0.18;
+      rr = 132 + (196 - 132) * t; rg = 156 + (182 - 156) * t; rb = 92 + (132 - 92) * t;
+    } else if (h < 0.64) {
+      const t = (h - 0.46) / 0.18;
+      rr = 196 + (180 - 196) * t; rg = 182 + (168 - 182) * t; rb = 132 + (146 - 132) * t;
+    } else if (h < 0.8) {
+      const t = (h - 0.64) / 0.16;
+      rr = 180 + (206 - 180) * t; rg = 168 + (206 - 168) * t; rb = 146 + (202 - 146) * t;
+    } else {
+      const t = Math.min(1, (h - 0.8) / 0.2);
+      rr = 206 + (240 - 206) * t; rg = 206 + (240 - 206) * t; rb = 202 + (238 - 202) * t;
     }
+
+    r = r + (rr - r) * RELIEF_TINT_WEIGHT;
+    g = g + (rg - g) * RELIEF_TINT_WEIGHT;
+    b = b + (rb - b) * RELIEF_TINT_WEIGHT;
     r *= light; g *= light; b *= light;
   }
   return (clamp8(r) << 16) | (clamp8(g) << 8) | clamp8(b);
