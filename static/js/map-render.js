@@ -277,7 +277,7 @@ function drawTerrainRelief(range, queueVisible = true) {
   ctx.strokeStyle = "rgba(28,22,13,.32)";
   for (let tz = range.tzMin; tz <= range.tzMax; tz++) {
     for (let tx = range.txMin; tx <= range.txMax; tx++) {
-      if (queueVisible) ensureHeightTile(range.lod, tx, tz);
+      if (queueVisible && !moving) ensureHeightTile(range.lod, tx, tz);
       const tile = state.heightTiles.get(heightTileKey(range.lod, tx, tz));
       if (!tile) continue;
       tile.last = performance.now();
@@ -287,7 +287,7 @@ function drawTerrainRelief(range, queueVisible = true) {
       if (tile.shadeBitmap) {
         ctx.save();
         ctx.globalCompositeOperation = "overlay";
-        ctx.globalAlpha = moving ? .38 : state.showContours ? .56 : .5;
+        ctx.globalAlpha = moving ? .44 : state.showContours ? .68 : .62;
         ctx.imageSmoothingEnabled = smoothRelief;
         if (smoothRelief) ctx.imageSmoothingQuality = "medium";
         ctx.drawImage(tile.shadeBitmap, px, pz, tilePx + 1, tilePx + 1);
@@ -296,14 +296,14 @@ function drawTerrainRelief(range, queueVisible = true) {
       if (state.showContours && tile.contourPath && range.tilePx >= 32) {
         const cellPx = tile.scale / state.zoom;
         const contourAlpha = moving
-          ? .09
-          : range.tilePx > 190 ? .1
-          : range.tilePx > 92 ? .14
-          : .18;
+          ? .1
+          : range.tilePx > 190 ? .12
+          : range.tilePx > 92 ? .17
+          : .22;
         ctx.save();
         ctx.translate(px, pz);
         ctx.scale(cellPx, cellPx);
-        ctx.lineWidth = Math.max(.42 / cellPx, .34);
+        ctx.lineWidth = Math.max(.38 / cellPx, .3);
         ctx.lineCap = "round";
         ctx.lineJoin = "round";
         ctx.strokeStyle = `rgba(38,43,22,${contourAlpha})`;

@@ -336,7 +336,7 @@ function createTile(grid, lod, tx, tz, bitmap = null) {
     }
     if (++lx === s) { lx = 0; lz++; }
   }
-  softenBiomePixels(data, s, 0.18);
+  softenBiomePixels(data, s, 0.16);
   c.putImageData(img, 0, 0);
   const canvas = upscaleBiomeCanvas(cnv, s, BIOME_TILE_RENDER_SCALE);
   return { canvas, grid, displayGrid, lod, tx, tz, samples: s, scale: cfg.scale, blocks: cfg.blocks, last: performance.now() };
@@ -461,6 +461,8 @@ function stylizedBiomeRgb(rgb, worldX, worldZ, biomeId) {
   const n1 = smoothTerrainNoise(worldX >> 5, worldZ >> 5) - 0.5;
   const n2 = smoothTerrainNoise(worldX >> 8, worldZ >> 8) - 0.5;
   const n3 = smoothTerrainNoise(worldX >> 3, worldZ >> 3) - 0.5;
+  const fakeRelief = smoothTerrainNoise((worldX - 48) >> 5, (worldZ - 48) >> 5) -
+    smoothTerrainNoise((worldX + 48) >> 5, (worldZ + 48) >> 5);
   let r = rgb[0], g = rgb[1], b = rgb[2];
   let contrast = 1 + n1 * 0.08 + n2 * 0.06;
   let lift = n2 * 5 + n3 * 2;
@@ -493,6 +495,13 @@ function stylizedBiomeRgb(rgb, worldX, worldZ, biomeId) {
     r = mixChannel(r, 134, 0.08);
     g = mixChannel(g, 174, 0.10);
     b = mixChannel(b, 78, 0.08);
+  }
+
+  if (!RENDER_WATER_BIOMES.has(biomeId)) {
+    const relief = fakeRelief * 22 + n1 * 5;
+    r += relief * 0.9;
+    g += relief * 0.72;
+    b += relief * 0.42;
   }
 
   return [

@@ -67,6 +67,8 @@ function stylizedBiomeRgb(rgb, worldX, worldZ, biomeId) {
   const n1 = smoothTerrainNoise(worldX >> 5, worldZ >> 5) - 0.5;
   const n2 = smoothTerrainNoise(worldX >> 8, worldZ >> 8) - 0.5;
   const n3 = smoothTerrainNoise(worldX >> 3, worldZ >> 3) - 0.5;
+  const fakeRelief = smoothTerrainNoise((worldX - 48) >> 5, (worldZ - 48) >> 5) -
+    smoothTerrainNoise((worldX + 48) >> 5, (worldZ + 48) >> 5);
   let r = rgb[0], g = rgb[1], b = rgb[2];
   let contrast = 1 + n1 * 0.08 + n2 * 0.06;
   let lift = n2 * 5 + n3 * 2;
@@ -99,6 +101,13 @@ function stylizedBiomeRgb(rgb, worldX, worldZ, biomeId) {
     r = mixChannel(r, 134, 0.08);
     g = mixChannel(g, 174, 0.10);
     b = mixChannel(b, 78, 0.08);
+  }
+
+  if (!WATER_BIOMES.has(biomeId)) {
+    const relief = fakeRelief * 22 + n1 * 5;
+    r += relief * 0.9;
+    g += relief * 0.72;
+    b += relief * 0.42;
   }
 
   return [
@@ -197,18 +206,18 @@ function decodeHeightGrid(data) {
 // Relief-shading light, fixed direction from the northwest. Flat ground
 // renders as neutral mid-gray so an 'overlay' blend leaves it unchanged;
 // slopes facing the light brighten, slopes away from it darken.
-const HILLSHADE_LIGHT = { x: -0.68, z: -0.54, y: 0.52 };
+const HILLSHADE_LIGHT = { x: -0.72, z: -0.58, y: 0.46 };
 // Gamma curve instead of a flat multiplier: gentle slopes (rolling plains,
 // where the real elevation change is only a couple of blocks) get boosted
 // disproportionately so they still show visible texture, while already-steep
 // slopes (mountains) aren't pushed further into saturation.
-const HILLSHADE_GAIN = 82;
-const HILLSHADE_GAMMA = 0.58;
+const HILLSHADE_GAIN = 108;
+const HILLSHADE_GAMMA = 0.54;
 // mapApproxHeight is an approximation, not real terrain — it has occasional
 // single-sample spikes (e.g. at biome/ocean edges) that would otherwise
 // blow out to pure black/white. Smoothing + a slope clamp keeps those from
 // dominating the shading.
-const HILLSHADE_MAX_SLOPE = 1.05;
+const HILLSHADE_MAX_SLOPE = 1.15;
 
 function smoothedHeight(grid, s, x, z) {
   let sum = 0;
@@ -256,8 +265,8 @@ function buildHillshadeBitmap(grid, paddedSamples, scale) {
       const dot = nx * lx + nz * lz + ny * ly;
       const raw = dot - baseDot;
       const shade = Math.sign(raw) * Math.pow(Math.abs(raw), HILLSHADE_GAMMA) * HILLSHADE_GAIN;
-      const terrace = Math.abs((smoothedHeight(grid, paddedSamples, x, z) % 12) - 6);
-      const gray = 128 + shade - Math.max(0, 2.8 - terrace) * 1.6;
+      const terrace = Math.abs((smoothedHeight(grid, paddedSamples, x, z) % 10) - 5);
+      const gray = 128 + shade - Math.max(0, 2.6 - terrace) * 2.1;
       // Warm highlight on lit slopes, cool shadow on the rest — a flat gray
       // hillshade reads as fog; a slight color split reads as sunlight.
       const tint = shade > 0 ? shade * 0.14 : shade * 0.20;
@@ -268,7 +277,7 @@ function buildHillshadeBitmap(grid, paddedSamples, scale) {
       data[i + 3] = 255;
     }
   }
-  softenBiomePixels(pixels, s, 0.18);
+  softenBiomePixels(data, inner, 0.1);
   ctx.putImageData(img, 0, 0);
   return canvas.transferToImageBitmap();
 }
@@ -303,6 +312,7 @@ function attachBiomeBitmap(data, payload) {
       biomeId
     );
   }
+  softenBiomePixels(pixels, s, 0.16);
   ctx.putImageData(img, 0, 0);
   const out = upscaleBiomeCanvas(canvas, s, BIOME_TILE_RENDER_SCALE);
   data.bitmap = out.transferToImageBitmap();
