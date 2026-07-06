@@ -51,10 +51,6 @@ const RELIEF_FLAT_BIOMES = new Set([0, 7, 10, 11, 24, 40, 41, 42, 43, 44, 45, 46
 // Lattice spacing for the fake heightmap, in chunks (broad hills + finer detail octave).
 const RELIEF_CELL = 7;
 const RELIEF_CELL_FINE = 3;
-// Height-band spacing (0..1 scale) for the topographic contour-line accents:
-// a coarser primary ring plus a finer hachure-style layer on top.
-const RELIEF_CONTOUR_STEP = 0.05;
-const RELIEF_CONTOUR_STEP_FINE = 0.018;
 
 function latticeNoise(gx, gz, salt) {
   let v = Math.imul((gx + salt) ^ 0x27d4eb2d, 0x85ebca6b) ^ Math.imul((gz - salt) ^ 0xc2b2ae35, 0x165667b1);
@@ -91,32 +87,41 @@ function terrainHeight(cx, cz) {
   return latticeHeight(cx, cz, RELIEF_CELL, 0) * 0.7 + latticeHeight(cx, cz, RELIEF_CELL_FINE, 97) * 0.3;
 }
 
-// Darkens a thin band each time `h` crosses a multiple of `step`, i.e. a
-// topographic contour line at that height.
-function contourDarken(h, step, width, strength) {
-  const band = (h % step) / step;
-  return band < width ? strength * (1 - band / width) : 0;
-}
+// Hypsometric tint targets: nudge the biome color toward a cool, shadowed
+// tone in low ground and a warm, sunlit tone on high ground (the classic
+// elevation-tint look on real relief maps).
+const RELIEF_LOWLAND_R = 14, RELIEF_LOWLAND_G = 34, RELIEF_LOWLAND_B = 28;
+const RELIEF_HIGHLAND_R = 236, RELIEF_HIGHLAND_G = 226, RELIEF_HIGHLAND_B = 196;
 
-// Hillshade from the fake heightmap's slope, plus stacked contour-line rings
-// (coarse + fine) for a topographic-map look.
-function reliefLight(cx, cz, biomeId) {
-  if (RELIEF_FLAT_BIOMES.has(biomeId)) return 1;
-  const h = terrainHeight(cx, cz);
-  const hx = terrainHeight(cx + 1, cz);
-  const hz = terrainHeight(cx, cz + 1);
-  let light = 1 + (h - hx) * 2.6 + (h - hz) * 1.9;
-  light -= contourDarken(h, RELIEF_CONTOUR_STEP, 0.14, 0.16);
-  light -= contourDarken(h, RELIEF_CONTOUR_STEP_FINE, 0.22, 0.08);
-  return light < 0.48 ? 0.48 : light > 1.34 ? 1.34 : light;
-}
+// Hillshade + hypsometric tint from the fake heightmap. The topographic
+// contour lines are drawn separately as a vector overlay on the main thread
+// (see tile-stream.js), so this only needs to do slope lighting, not its own
+// banding. Written as scalar math with no intermediate objects/arrays (this
+// runs per pixel while a tile is being built, so allocations here turn into
+// GC churn).
+function tintBiome(rgb, cx, cz, biomeId) {
+  let r = rgb[0], g = rgb[1], b = rgb[2];
+  if (!RELIEF_FLAT_BIOMES.has(biomeId)) {
+    const h = terrainHeight(cx, cz);
+    const hx = terrainHeight(cx + 1, cz);
+    const hz = terrainHeight(cx, cz + 1);
+    let light = 1 + (h - hx) * 2.9 + (h - hz) * 2.1;
+    light = light < 0.42 ? 0.42 : light > 1.4 ? 1.4 : light;
 
-function tintBiome(rgb, x, z, biomeId) {
-  const light = reliefLight(x, z, biomeId);
-  const r = clamp8(rgb[0] * light);
-  const g = clamp8(rgb[1] * light);
-  const b = clamp8(rgb[2] * light);
-  return (r << 16) | (g << 8) | b;
+    if (h > 0.62) {
+      const t = Math.min(1, (h - 0.62) / 0.3) * 0.42;
+      r += (RELIEF_HIGHLAND_R - r) * t;
+      g += (RELIEF_HIGHLAND_G - g) * t;
+      b += (RELIEF_HIGHLAND_B - b) * t;
+    } else if (h < 0.32) {
+      const t = Math.min(1, (0.32 - h) / 0.3) * 0.32;
+      r += (RELIEF_LOWLAND_R - r) * t;
+      g += (RELIEF_LOWLAND_G - g) * t;
+      b += (RELIEF_LOWLAND_B - b) * t;
+    }
+    r *= light; g *= light; b *= light;
+  }
+  return (clamp8(r) << 16) | (clamp8(g) << 8) | clamp8(b);
 }
 
 // Emboss biome borders (coastlines, mountain edges, ...) with a cheap

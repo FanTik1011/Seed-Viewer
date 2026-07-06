@@ -391,10 +391,6 @@ const RELIEF_FLAT_BIOMES = new Set([0, 7, 10, 11, 24, 40, 41, 42, 43, 44, 45, 46
 // Lattice spacing for the fake heightmap, in chunks (broad hills + finer detail octave).
 const RELIEF_CELL = 7;
 const RELIEF_CELL_FINE = 3;
-// Height-band spacing (0..1 scale) for the topographic contour-line accents:
-// a coarser primary ring plus a finer hachure-style layer on top.
-const RELIEF_CONTOUR_STEP = 0.05;
-const RELIEF_CONTOUR_STEP_FINE = 0.018;
 
 function latticeNoise(gx, gz, salt) {
   let v = Math.imul((gx + salt) ^ 0x27d4eb2d, 0x85ebca6b) ^ Math.imul((gz - salt) ^ 0xc2b2ae35, 0x165667b1);
@@ -430,32 +426,48 @@ function terrainHeight(cx, cz) {
   return latticeHeight(cx, cz, RELIEF_CELL, 0) * 0.7 + latticeHeight(cx, cz, RELIEF_CELL_FINE, 97) * 0.3;
 }
 
-// Darkens a thin band each time `h` crosses a multiple of `step`, i.e. a
-// topographic contour line at that height.
-function contourDarken(h, step, width, strength) {
-  const band = (h % step) / step;
-  return band < width ? strength * (1 - band / width) : 0;
+// Contour lines (see buildReliefTile below) trace only the broad octave, not
+// the fine detail — otherwise every little bump adds its own ring and the
+// lines turn into dense hatching instead of a few clean sweeping curves.
+function contourHeight(cx, cz) {
+  return latticeHeight(cx, cz, RELIEF_CELL, 0);
 }
 
-// Hillshade from the fake heightmap's slope, plus stacked contour-line rings
-// (coarse + fine) for a topographic-map look.
-function reliefLight(cx, cz, biomeId) {
-  if (RELIEF_FLAT_BIOMES.has(biomeId)) return 1;
-  const h = terrainHeight(cx, cz);
-  const hx = terrainHeight(cx + 1, cz);
-  const hz = terrainHeight(cx, cz + 1);
-  let light = 1 + (h - hx) * 2.6 + (h - hz) * 1.9;
-  light -= contourDarken(h, RELIEF_CONTOUR_STEP, 0.14, 0.16);
-  light -= contourDarken(h, RELIEF_CONTOUR_STEP_FINE, 0.22, 0.08);
-  return light < 0.48 ? 0.48 : light > 1.34 ? 1.34 : light;
-}
+// Hypsometric tint targets: nudge the biome color toward a cool, shadowed
+// tone in low ground and a warm, sunlit tone on high ground (the classic
+// elevation-tint look on real relief maps).
+const RELIEF_LOWLAND_R = 14, RELIEF_LOWLAND_G = 34, RELIEF_LOWLAND_B = 28;
+const RELIEF_HIGHLAND_R = 236, RELIEF_HIGHLAND_G = 226, RELIEF_HIGHLAND_B = 196;
 
-function tintBiome(rgb, x, z, biomeId) {
-  const light = reliefLight(x, z, biomeId);
-  const r = clamp8(rgb[0] * light);
-  const g = clamp8(rgb[1] * light);
-  const b = clamp8(rgb[2] * light);
-  return (r << 16) | (g << 8) | b;
+// Hillshade + hypsometric tint from the fake heightmap. The topographic
+// contour lines are drawn separately as a vector overlay (see
+// buildReliefTile/drawReliefContours) so this only needs to do slope
+// lighting, not its own banding. Written as scalar math with no intermediate
+// objects/arrays (this runs per pixel while a tile is being built, so
+// allocations here turn into GC churn).
+function tintBiome(rgb, cx, cz, biomeId) {
+  let r = rgb[0], g = rgb[1], b = rgb[2];
+  if (!RELIEF_FLAT_BIOMES.has(biomeId)) {
+    const h = terrainHeight(cx, cz);
+    const hx = terrainHeight(cx + 1, cz);
+    const hz = terrainHeight(cx, cz + 1);
+    let light = 1 + (h - hx) * 2.9 + (h - hz) * 2.1;
+    light = light < 0.42 ? 0.42 : light > 1.4 ? 1.4 : light;
+
+    if (h > 0.62) {
+      const t = Math.min(1, (h - 0.62) / 0.3) * 0.42;
+      r += (RELIEF_HIGHLAND_R - r) * t;
+      g += (RELIEF_HIGHLAND_G - g) * t;
+      b += (RELIEF_HIGHLAND_B - b) * t;
+    } else if (h < 0.32) {
+      const t = Math.min(1, (0.32 - h) / 0.3) * 0.32;
+      r += (RELIEF_LOWLAND_R - r) * t;
+      g += (RELIEF_LOWLAND_G - g) * t;
+      b += (RELIEF_LOWLAND_B - b) * t;
+    }
+    r *= light; g *= light; b *= light;
+  }
+  return (clamp8(r) << 16) | (clamp8(g) << 8) | clamp8(b);
 }
 
 // Emboss biome borders (coastlines, mountain edges, ...) with a cheap
@@ -509,20 +521,27 @@ function pruneTileCache() {
 
 // --- Topographic contour-line overlay -------------------------------------
 // Real cubiomes data has no heightmap, so contour lines are traced from the
-// same fake `terrainHeight` field used for hillshading, via marching squares.
-// Unlike the per-pixel shading, these are vector line segments (a Path2D per
-// tile) stroked at a fixed 1 CSS-pixel width regardless of zoom, so they stay
-// thin and smooth instead of looking like blocky pixel noise.
+// same fake `contourHeight` field used for hillshading (broad octave only —
+// see contourHeight above), via marching squares. Unlike the per-pixel
+// shading, these are vector line segments (a Path2D per tile) stroked at a
+// fixed 1 CSS-pixel width regardless of zoom, so they stay thin and smooth
+// instead of looking like blocky pixel noise.
 //
 // Contour tiles piggyback on the already-fetched LOD0 biome tile (same
 // 256-block footprint) for two things: they only get built once that tile's
 // biome grid is cached (no extra network fetches), and they use its grid to
 // mask contour lines to land only (oceans/rivers stay clean).
 const RELIEF_GRID_N = 16;         // marching-squares cells per axis per tile
-const RELIEF_LINE_STEP = 0.035;   // contour spacing on the 0..1 height scale
+const RELIEF_LINE_STEP = 0.08;    // contour spacing on the 0..1 height scale — wider gaps, fewer lines
 const RELIEF_BUILD_BUDGET = 6;    // tiles built per frame while panning/zooming
-const MAX_RELIEF_TILE_CACHE = MAX_TILE_CACHE;
+const MAX_RELIEF_TILE_CACHE = 400;
 const reliefTiles = new Map();
+// Reused scratch buffers for buildReliefTile — every entry gets overwritten
+// before it's read on each call, and builds run synchronously one at a time,
+// so reuse is safe and avoids allocating two new TypedArrays per tile.
+const RELIEF_PTS = RELIEF_GRID_N + 1;
+const reliefHeightScratch = new Float32Array(RELIEF_PTS * RELIEF_PTS);
+const reliefLandScratch = new Uint8Array(RELIEF_PTS * RELIEF_PTS);
 
 function reliefKey(tx, tz) {
   return `${tx},${tz}`;
@@ -536,31 +555,56 @@ function biomeGridSample(tile, blockX, blockZ) {
   return grid[sz * s + sx];
 }
 
-function lerpEdge(t, va, vb, ax, az, bx, bz) {
-  const f = va !== vb ? (t - va) / (vb - va) : 0.5;
-  return [ax + (bx - ax) * f, az + (bz - az) * f];
+function frac(t, va, vb) {
+  return va !== vb ? (t - va) / (vb - va) : 0.5;
 }
 
 // Standard marching-squares single-level cell trace (corners: top-left,
 // top-right, bottom-right, bottom-left). Complementary cases (c and 15-c)
 // produce the same boundary line, so only 8 distinct patterns are needed.
+// Edge points are computed inline (no per-call closures/arrays) since this
+// runs for every contour crossing in every cell of every tile being built.
 function marchCell(path, tl, tr, br, bl, x0, z0, x1, z1, t) {
   const idx = (tl >= t ? 8 : 0) | (tr >= t ? 4 : 0) | (br >= t ? 2 : 0) | (bl >= t ? 1 : 0);
   if (idx === 0 || idx === 15) return;
-  const top = () => lerpEdge(t, tl, tr, x0, z0, x1, z0);
-  const right = () => lerpEdge(t, tr, br, x1, z0, x1, z1);
-  const bottom = () => lerpEdge(t, bl, br, x0, z1, x1, z1);
-  const left = () => lerpEdge(t, tl, bl, x0, z0, x0, z1);
-  const seg = (a, b) => { path.moveTo(a[0], a[1]); path.lineTo(b[0], b[1]); };
+  const dx = x1 - x0, dz = z1 - z0;
   switch (idx) {
-    case 1: case 14: seg(left(), bottom()); break;
-    case 2: case 13: seg(bottom(), right()); break;
-    case 3: case 12: seg(left(), right()); break;
-    case 4: case 11: seg(top(), right()); break;
-    case 6: case 9: seg(top(), bottom()); break;
-    case 7: case 8: seg(top(), left()); break;
-    case 5: seg(top(), right()); seg(bottom(), left()); break;
-    case 10: seg(top(), left()); seg(bottom(), right()); break;
+    case 1: case 14:
+      path.moveTo(x0, z0 + dz * frac(t, tl, bl));
+      path.lineTo(x0 + dx * frac(t, bl, br), z1);
+      break;
+    case 2: case 13:
+      path.moveTo(x0 + dx * frac(t, bl, br), z1);
+      path.lineTo(x1, z0 + dz * frac(t, tr, br));
+      break;
+    case 3: case 12:
+      path.moveTo(x0, z0 + dz * frac(t, tl, bl));
+      path.lineTo(x1, z0 + dz * frac(t, tr, br));
+      break;
+    case 4: case 11:
+      path.moveTo(x0 + dx * frac(t, tl, tr), z0);
+      path.lineTo(x1, z0 + dz * frac(t, tr, br));
+      break;
+    case 6: case 9:
+      path.moveTo(x0 + dx * frac(t, tl, tr), z0);
+      path.lineTo(x0 + dx * frac(t, bl, br), z1);
+      break;
+    case 7: case 8:
+      path.moveTo(x0 + dx * frac(t, tl, tr), z0);
+      path.lineTo(x0, z0 + dz * frac(t, tl, bl));
+      break;
+    case 5:
+      path.moveTo(x0 + dx * frac(t, tl, tr), z0);
+      path.lineTo(x1, z0 + dz * frac(t, tr, br));
+      path.moveTo(x0 + dx * frac(t, bl, br), z1);
+      path.lineTo(x0, z0 + dz * frac(t, tl, bl));
+      break;
+    case 10:
+      path.moveTo(x0 + dx * frac(t, tl, tr), z0);
+      path.lineTo(x0, z0 + dz * frac(t, tl, bl));
+      path.moveTo(x0 + dx * frac(t, bl, br), z1);
+      path.lineTo(x1, z0 + dz * frac(t, tr, br));
+      break;
   }
 }
 
@@ -578,12 +622,12 @@ function buildReliefTile(tx, tz) {
   const baseX = tx * blocks;
   const baseZ = tz * blocks;
   const pts = n + 1;
-  const heights = new Float32Array(pts * pts);
-  const land = new Uint8Array(pts * pts);
+  const heights = reliefHeightScratch;
+  const land = reliefLandScratch;
   for (let gz = 0; gz < pts; gz++) {
     for (let gx = 0; gx < pts; gx++) {
       const idx = gz * pts + gx;
-      heights[idx] = terrainHeight(baseCx + gx * cellChunks, baseCz + gz * cellChunks);
+      heights[idx] = contourHeight(baseCx + gx * cellChunks, baseCz + gz * cellChunks);
       const biomeId = biomeGridSample(biomeTile, Math.min(blocks, gx * cellChunks * 16), Math.min(blocks, gz * cellChunks * 16));
       land[idx] = RELIEF_FLAT_BIOMES.has(biomeId) ? 0 : 1;
     }
@@ -616,6 +660,8 @@ function buildReliefTile(tx, tz) {
 
 // Builds any missing, currently-visible contour tiles, spending at most
 // RELIEF_BUILD_BUDGET per call so a big pan/zoom jump can't spike a frame.
+// Prunes its own cache independently of the biome-tile lifecycle, so it
+// can't grow unbounded even if biome tiles rarely churn.
 function pumpReliefTiles(range) {
   let built = 0;
   for (let tz = range.tzMin; tz <= range.tzMax; tz++) {
@@ -625,9 +671,13 @@ function pumpReliefTiles(range) {
       const tile = buildReliefTile(tx, tz);
       if (!tile) continue;
       reliefTiles.set(key, tile);
-      if (++built >= RELIEF_BUILD_BUDGET) return;
+      if (++built >= RELIEF_BUILD_BUDGET) {
+        pruneReliefTiles();
+        return;
+      }
     }
   }
+  if (built) pruneReliefTiles();
 }
 
 function pruneReliefTiles() {
