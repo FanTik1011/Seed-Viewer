@@ -381,7 +381,7 @@
     width: 100%;
     height: 100%;
     cursor: grab;
-    image-rendering: pixelated;
+    image-rendering: auto;
     background: #07110f;
   }
   #map-canvas.dragging { cursor: grabbing; }

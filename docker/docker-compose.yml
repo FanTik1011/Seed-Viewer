@@ -9,8 +9,10 @@ services:
     environment:
       PORT: "8080"
       PUBLIC_BASE_PATH: "/minecraft-tools/Seed-Viewer"
+      PUBLIC_PERF_MODE: "server"
+      MAX_STRUCTURE_WORKERS: "2"
       WEB_CONCURRENCY: "1"
-      GUNICORN_THREADS: "4"
+      GUNICORN_THREADS: "2"
       GUNICORN_TIMEOUT: "120"
     ports:
       - "8080:8080"

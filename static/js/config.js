@@ -4,24 +4,43 @@ const TILE_BLOCKS = 256;
 const WORKER_URL = `${BASE_PATH}/static/seed-worker.js`;
 const SAMPLE_SCALE = 8;
 const TILE_SAMPLES = TILE_BLOCKS / SAMPLE_SCALE;
+const BIOME_TILE_RENDER_SCALE = 1;
 const IS_LOCAL_HOST = /^(localhost|127\.0\.0\.1|\[?::1\]?)$/.test(window.location.hostname);
 const PERF_MODE = String(window.SEED_VIEWER_PERF_MODE || "").toLowerCase();
 const IS_HEROKU = PERF_MODE === "heroku" || /\.herokuapp\.com$/i.test(window.location.hostname);
-const MAX_TILE_CACHE = 800;
-const MAX_TILE_QUEUE = 180;
-const MAX_TILE_REQUESTS = IS_HEROKU
-  ? 5
+const SERVER_PERF_MODE = IS_HEROKU || PERF_MODE === "server" || PERF_MODE === "lite" || (!IS_LOCAL_HOST && PERF_MODE !== "quality");
+const MAX_TILE_CACHE = SERVER_PERF_MODE ? 520 : 800;
+const MAX_TILE_QUEUE = SERVER_PERF_MODE ? 96 : 180;
+const MAX_TILE_REQUESTS = SERVER_PERF_MODE
+  ? 3
   : IS_LOCAL_HOST ? Math.max(3, Math.min(6, Math.floor((navigator.hardwareConcurrency || 4) / 2))) : 5;
-const MAX_DRAW_TILES = 300;
+const MAX_DRAW_TILES = SERVER_PERF_MODE ? 220 : 300;
+const MAX_HEIGHT_TILE_CACHE = SERVER_PERF_MODE ? 260 : 500;
+const MAX_HEIGHT_REQUESTS = SERVER_PERF_MODE ? 1 : IS_LOCAL_HOST ? 4 : 3;
+const DEFER_INITIAL_STRUCTURES = SERVER_PERF_MODE;
+// Height/hillshade resolution adapts to zoom: full detail (matching the
+// biome grid) when zoomed in close enough to actually see it, coarser (and
+// cheaper) once tiles are small on screen and the extra detail would just be
+// smoothed away anyway. Tiers are checked in order, first match wins.
+const HEIGHT_SAMPLE_DIV_TIERS = SERVER_PERF_MODE ? [
+  { maxZoom: 1.4, div: 2 },
+  { maxZoom: 4.2, div: 3 },
+  { maxZoom: Infinity, div: 5 }
+] : [
+  { maxZoom: 1.4, div: 1 },
+  { maxZoom: 4.2, div: 2 },
+  { maxZoom: Infinity, div: 4 }
+];
+const CONTOUR_INTERVAL = SERVER_PERF_MODE ? 18 : 12;
 const TILE_REQUEST_TIMEOUT = IS_HEROKU ? 24000 : IS_LOCAL_HOST ? 12000 : 18000;
 
-const STRUCT_REQUEST_TIMEOUT = 15000;
+const STRUCT_REQUEST_TIMEOUT = SERVER_PERF_MODE ? 22000 : 15000;
 const MAX_TILE_ATTEMPTS = 3;
 const TILE_RETRY_PENALTY = 5500;
 const TILE_RETRY_BASE_DELAY = IS_LOCAL_HOST ? 450 : 500;
 const PREFETCH_MARGIN = 0;
-const MAX_TILE_ENQUEUE_PER_RENDER = IS_LOCAL_HOST ? 60 : 36;
-const MAX_TILE_QUEUE_WHILE_LOADING = IS_LOCAL_HOST ? 180 : 130;
+const MAX_TILE_ENQUEUE_PER_RENDER = SERVER_PERF_MODE ? 18 : IS_LOCAL_HOST ? 60 : 36;
+const MAX_TILE_QUEUE_WHILE_LOADING = SERVER_PERF_MODE ? 72 : IS_LOCAL_HOST ? 180 : 130;
 const TILE_VIEW_MARGIN = 0;
 const TILE_QUEUE_VIEW_MARGIN = 1;
 const TILE_RESULT_KEEP_MARGIN = 1;
@@ -37,27 +56,27 @@ const DENSE_MARKER_TYPES = new Set([
   "Dungeon", "Cave", "Ravine", "Lava_Pool", "Apple", "Desert_Well"
 ]);
 
-const STRUCT_REGION = 3072;            
-const STRUCT_REGION_MARGIN = 0;        
-const MAX_STRUCT_REGION_REQUESTS = 2;  
-const STRUCT_BULK_RADIUS = 2048;       
-const STRUCT_BULK_MAX_RADIUS = 3072;   
-const STRUCT_VIEW_BUFFER = 768;        
-const MAX_STREAM_MARKERS = 3500;       
+const STRUCT_REGION = 3072;
+const STRUCT_REGION_MARGIN = 0;
+const MAX_STRUCT_REGION_REQUESTS = SERVER_PERF_MODE ? 1 : 2;
+const STRUCT_BULK_RADIUS = SERVER_PERF_MODE ? 1536 : 2048;
+const STRUCT_BULK_MAX_RADIUS = SERVER_PERF_MODE ? 2304 : 3072;
+const STRUCT_VIEW_BUFFER = SERVER_PERF_MODE ? 512 : 768;
+const MAX_STREAM_MARKERS = SERVER_PERF_MODE ? 2200 : 3500;
 const STRUCT_KEEP_RADIUS = 2;          
-const STRUCT_DEFER_DELAY = 140;        
+const STRUCT_DEFER_DELAY = SERVER_PERF_MODE ? 420 : 140;
 const STRUCT_FAST_TYPES = [
   "Village", "Mansion", "Monument", "Outpost",
   "Desert_Temple", "Jungle_Temple", "Witch_Hut", "Igloo"
 ];
 
-const WORKER_POOL_SIZE = Math.max(1, Math.min(MAX_TILE_REQUESTS, Math.ceil((navigator.hardwareConcurrency || 4) / 3)));
+const WORKER_POOL_SIZE = SERVER_PERF_MODE ? Math.min(2, MAX_TILE_REQUESTS) : Math.max(1, Math.min(MAX_TILE_REQUESTS, Math.ceil((navigator.hardwareConcurrency || 4) / 3)));
 const VISIBLE_TILE_PRIORITY_BOOST = 1_000_000;
 const COARSE_TILE_PRIORITY_BOOST = 500_000;
-const TILE_BUILD_BATCH = 8;
-const TILE_BUILD_FRAME_BUDGET = 5;
-const TILE_PENDING_VIEW_MARGIN = IS_LOCAL_HOST ? 2 : 3;
-const ZOOM_TILE_SETTLE_DELAY = IS_HEROKU ? 220 : 140;
+const TILE_BUILD_BATCH = SERVER_PERF_MODE ? 5 : 8;
+const TILE_BUILD_FRAME_BUDGET = SERVER_PERF_MODE ? 3.5 : 5;
+const TILE_PENDING_VIEW_MARGIN = SERVER_PERF_MODE ? 1 : IS_LOCAL_HOST ? 2 : 3;
+const ZOOM_TILE_SETTLE_DELAY = SERVER_PERF_MODE ? 260 : 140;
 
 const MODERN_LODS = [
   { blocks: 256,   samples: 64,  scale: 4  },
@@ -83,8 +102,8 @@ const MAX_ZOOM = 8;
 const DEFAULT_ZOOM = 2;
 const ZOOM_EASE = 0.25;
 const PAN_FRICTION = 0.9;
-const INITIAL_SCAN_RADIUS = 2048;
-const MANUAL_SCAN_RADIUS = 3072;
+const INITIAL_SCAN_RADIUS = SERVER_PERF_MODE ? 1536 : 2048;
+const MANUAL_SCAN_RADIUS = SERVER_PERF_MODE ? 2304 : 3072;
 const MAP_BG = "#17158b";
 const EMPTY_TILE_COLORS = ["#17158b", "#17158b"];
 const UNKNOWN_BIOME_RGB = [38, 45, 41];

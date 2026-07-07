@@ -25,6 +25,8 @@ async function loadWorld(options = {}) {
   zoomTileLoadingPaused = false;
   state.tiles.clear();
   state.tileQueue.clear();
+  state.heightTiles.clear();
+  state.heightPending.clear();
   tileBuildQueue.length = 0;
   state.structures = {};
   resetStructureStream();
@@ -32,7 +34,10 @@ async function loadWorld(options = {}) {
   els.empty.classList.add("hidden");
   showLoader("Loading seed", "Preparing fast map preview...");
   try {
-    const data = await fetchStructuresAround(0, 0, options.radius || INITIAL_SCAN_RADIUS, []);
+    let data = {};
+    if (!DEFER_INITIAL_STRUCTURES) {
+      data = await fetchStructuresAround(0, 0, options.radius || INITIAL_SCAN_RADIUS, []);
+    }
     if (runId !== state.runId) return;
     state.structures = data;
     state.structSeen = {};
@@ -52,9 +57,14 @@ async function loadWorld(options = {}) {
     requestRender();
     const center = { x: state.viewX, z: state.viewZ };
     const radius = Math.max(options.radius || INITIAL_SCAN_RADIUS, visibleStructureRadius());
-    markRegionsFetched(center.x, center.z, radius);
-    startVisibleStructureBulk(runId, center.x, center.z, radius);
-    scheduleStructureStream(180, true);
+    if (DEFER_INITIAL_STRUCTURES) {
+      hideLoader();
+      scheduleInitialStructureLoad(runId, center.x, center.z, radius);
+    } else {
+      markRegionsFetched(center.x, center.z, radius);
+      startVisibleStructureBulk(runId, center.x, center.z, radius);
+      scheduleStructureStream(180, true);
+    }
   } catch (err) {
     if (runId !== state.runId) return;
     console.error(err);
@@ -63,6 +73,31 @@ async function loadWorld(options = {}) {
   } finally {
     if (runId === state.runId) hideLoader();
   }
+}
+
+function scheduleInitialStructureLoad(runId, cx, cz, radius) {
+  setTimeout(() => {
+    if (runId !== state.runId || !state.loaded) return;
+    markRegionsFetched(cx, cz, radius);
+    fetchStructuresAround(cx, cz, radius, [])
+      .then(data => {
+        if (runId !== state.runId || !state.loaded) return;
+        mergeStreamedStructures(data);
+        if (data.spawn && !state.selected) {
+          selectLocation({ type:"spawn", ...data.spawn, ...STRUCT_META.spawn });
+        }
+        invalidateMarkers();
+        buildSidebar();
+        requestRender();
+        startVisibleStructureBulk(runId, cx, cz, radius);
+        scheduleStructureStream(420, true);
+      })
+      .catch(err => {
+        if (runId !== state.runId || err?.name === "AbortError") return;
+        console.warn("Initial structures failed", err);
+        scheduleStructureStream(900, true);
+      });
+  }, 120);
 }
 
 async function scanCurrentArea() {

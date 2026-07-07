@@ -53,6 +53,30 @@ void free_array(int *arr) {
     if (arr) free(arr);
 }
 
+// ---- Approximate surface height grid (overworld only) ----
+// Writes w*h floats into a caller-supplied buffer. Same x/z/scale layout as
+// get_biome_grid. mapApproxHeight samples on a fixed 1:4 grid internally, so
+// each requested sample is queried individually at its own world position.
+int get_height_grid(long long seed, int mc, int x, int z, int w, int h, int scale, float *out) {
+    Generator g;
+    setupGenerator(&g, mc, 0);
+    applySeed(&g, DIM_OVERWORLD, (uint64_t)seed);
+
+    SurfaceNoise sn;
+    initSurfaceNoise(&sn, DIM_OVERWORLD, (uint64_t)seed);
+
+    for (int j = 0; j < h; j++) {
+        for (int i = 0; i < w; i++) {
+            int wx = x + i * scale;
+            int wz = z + j * scale;
+            float y = 0;
+            mapApproxHeight(&y, NULL, &g, &sn, wx >> 2, wz >> 2, 1, 1);
+            out[j * w + i] = y;
+        }
+    }
+    return 0;
+}
+
 // ---- Spawn ----
 typedef struct { int x; int z; } SpawnPos;
 

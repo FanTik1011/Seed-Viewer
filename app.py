@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
+from flask_compress import Compress
 import base64
 import ctypes
 import os
@@ -42,6 +43,15 @@ class PrefixMiddleware:
 
 app = Flask(__name__, static_folder='static', template_folder='templates')
 CORS(app, origins=["http://localhost:*", "http://127.0.0.1:*"])
+SERVER_PERF_MODE = PUBLIC_PERF_MODE in {"heroku", "server", "lite"}
+app.config["COMPRESS_MIMETYPES"] = (
+    ["text/html", "text/css", "application/javascript"]
+    if SERVER_PERF_MODE else
+    ["application/json", "text/html", "text/css", "application/javascript"]
+)
+app.config["COMPRESS_LEVEL"] = 3 if SERVER_PERF_MODE else 6
+app.config["COMPRESS_MIN_SIZE"] = 2048 if SERVER_PERF_MODE else 500
+Compress(app)
 if PUBLIC_BASE_PATH:
     app.wsgi_app = PrefixMiddleware(app.wsgi_app, PUBLIC_BASE_PATH)
 
@@ -97,6 +107,17 @@ except AttributeError:
 
 lib.free_array.restype  = None
 lib.free_array.argtypes = [ctypes.POINTER(ctypes.c_int)]
+
+try:
+    lib.get_height_grid.restype  = ctypes.c_int
+    lib.get_height_grid.argtypes = [
+        ctypes.c_longlong, ctypes.c_int,
+        ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+        ctypes.POINTER(ctypes.c_float),
+    ]
+    HAS_HEIGHTS = True
+except AttributeError:
+    HAS_HEIGHTS = False
 
 lib.get_spawn.restype  = SpawnPos
 lib.get_spawn.argtypes = [ctypes.c_longlong, ctypes.c_int]
@@ -278,7 +299,7 @@ MAX_STRUCT_W    = 32768
 MAX_STRUCT_H    = 32768
 MAX_STRONGHOLDS = 128
 MAX_STRUCTURES  = 512
-MAX_STRUCTURE_WORKERS = max(2, min(4, (os.cpu_count() or 4) // 2))
+MAX_STRUCTURE_WORKERS = int(os.environ.get("MAX_STRUCTURE_WORKERS", "2" if PUBLIC_PERF_MODE in {"heroku", "server", "lite"} else "4"))
 MAX_SEARCH_ATTEMPTS = 250
 MAX_SEARCH_RESULTS  = 24
 MAX_SEARCH_RADIUS   = 6000
@@ -874,6 +895,20 @@ def _biome_grid_cached(seed: int, mc: int, dim_id: int,
     return grid
 
 
+MAX_HEIGHT_SCALE = 256
+
+
+@lru_cache(maxsize=2048)
+def _height_grid_cached(seed: int, mc: int, x: int, z: int, w: int, h: int, scale: int) -> tuple:
+    if not HAS_HEIGHTS:
+        raise RuntimeError("Height estimation requires a rebuilt libseedmap with get_height_grid")
+    if not (1 <= scale <= MAX_HEIGHT_SCALE):
+        raise RuntimeError(f"Unsupported height scale: {scale}. Valid range: 1-{MAX_HEIGHT_SCALE}")
+    buf = (ctypes.c_float * (w * h))()
+    ctypes_call(lib.get_height_grid, seed, mc, x, z, w, h, scale, buf)
+    return tuple(buf)
+
+
 import time as _time
 _CACHE_BUST = str(int(_time.time()))
 
@@ -905,9 +940,9 @@ def capabilities():
             },
         },
         "dimensions": {
-            "overworld": {"biomes": True, "structures": True, "spawn": True, "strongholds": True},
-            "nether": {"biomes": HAS_DIM_BIOMES, "structures": True, "spawn": False, "strongholds": False},
-            "end": {"biomes": HAS_DIM_BIOMES, "structures": HAS_DIM_STRUCTURES, "spawn": False, "strongholds": False},
+            "overworld": {"biomes": True, "structures": True, "spawn": True, "strongholds": True, "heights": HAS_HEIGHTS},
+            "nether": {"biomes": HAS_DIM_BIOMES, "structures": True, "spawn": False, "strongholds": False, "heights": False},
+            "end": {"biomes": HAS_DIM_BIOMES, "structures": HAS_DIM_STRUCTURES, "spawn": False, "strongholds": False, "heights": False},
         },
         "structures": {
             "overworld": _available_structures("1.21", "overworld") + ["Stronghold", "spawn"],
@@ -967,6 +1002,51 @@ def biomes():
     else:
         payload = {
             "seed": seed_str, "version": version, "dimension": dimension,
+            "x": x, "z": z, "w": w, "h": h, "scale": scale,
+            "grid": list(grid),
+        }
+
+    resp = jsonify(payload)
+    resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    return resp
+
+
+@app.route('/api/heights')
+def heights():
+    seed_str = request.args.get('seed', '0')
+    version  = request.args.get('version', '1.20')
+
+    if version not in MC_VERSIONS:
+        return error(f"Unknown version: {version!r}. Valid: {list(MC_VERSIONS)}")
+    if _is_bedrock_version(version):
+        return error("Height estimation is only available for Java seeds", 501)
+    if not HAS_HEIGHTS:
+        return error("Height estimation requires a rebuilt libseedmap with get_height_grid", 501)
+
+    x     = _int_arg('x', -1024)
+    z     = _int_arg('z', -1024)
+    w     = _int_arg('w', 64,  lo=1, hi=MAX_BIOME_W)
+    h     = _int_arg('h', 64,  lo=1, hi=MAX_BIOME_H)
+    scale = _int_arg('scale', 16, lo=1, hi=MAX_HEIGHT_SCALE)
+
+    mc   = MC_VERSIONS[version]
+    seed = seed_for_version(seed_str, version)
+
+    try:
+        grid = _height_grid_cached(seed, mc, x, z, w, h, scale)
+    except RuntimeError as e:
+        return error(str(e), 500)
+
+    if request.args.get("format") == "f32":
+        payload = {
+            "seed": seed_str, "version": version,
+            "x": x, "z": z, "w": w, "h": h, "scale": scale,
+            "gridEncoding": "f32-b64",
+            "grid": base64.b64encode(bytes((ctypes.c_float * len(grid))(*grid))).decode("ascii"),
+        }
+    else:
+        payload = {
+            "seed": seed_str, "version": version,
             "x": x, "z": z, "w": w, "h": h, "scale": scale,
             "grid": list(grid),
         }
