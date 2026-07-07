@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template
+﻿from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 import base64
 import ctypes
@@ -25,6 +25,7 @@ def _normalise_base_path(value: str) -> str:
 
 PUBLIC_BASE_PATH = _normalise_base_path(os.environ.get("PUBLIC_BASE_PATH", ""))
 PUBLIC_PERF_MODE = os.environ.get("PUBLIC_PERF_MODE", "heroku" if os.environ.get("DYNO") else "").strip().lower()
+BUILD_ID = "seed-viewer-layered-v10-2026-07-07"
 
 
 class PrefixMiddleware:
@@ -875,7 +876,28 @@ def _biome_grid_cached(seed: int, mc: int, dim_id: int,
 
 
 import time as _time
-_CACHE_BUST = str(int(_time.time()))
+_CACHE_BUST = BUILD_ID
+
+
+@app.after_request
+def no_cache_frontend_assets(response):
+    path = request.path or ""
+    no_cache_exts = (".html", ".js", ".css", ".json")
+    if path == "/" or path.endswith(no_cache_exts) or path in ("/health", "/version.json"):
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
+@app.route('/health')
+@app.route('/version.json')
+def health():
+    return jsonify({
+        "ok": True,
+        "buildId": BUILD_ID,
+        "renderer": "flask-cubiomes-layered",
+        "cachePolicy": "html-js-css-json-no-store",
+    })
 
 @app.route('/')
 def index():
@@ -884,6 +906,7 @@ def index():
         base_path=PUBLIC_BASE_PATH,
         cache_bust=_CACHE_BUST,
         perf_mode=PUBLIC_PERF_MODE,
+        build_id=BUILD_ID,
     )
 
 
@@ -1301,3 +1324,5 @@ if __name__ == '__main__':
     debug = os.environ.get("FLASK_DEBUG", "0") == "1"
     log.info("Starting SeedMap on port %d (debug=%s)", port, debug)
     app.run(debug=debug, host='0.0.0.0', port=port, threaded=True)
+
+
