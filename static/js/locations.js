@@ -580,12 +580,7 @@ function buildSidebar() {
       state.showGrid = !state.showGrid;
       buildSidebar();
       requestRender();
-    }),
-    makeLayerRow("wave", "Contour Lines", "#c9a86a", null, state.showContours, () => {
-      state.showContours = !state.showContours;
-      buildSidebar();
-      requestRender();
-    }, { disabled: state.dimension !== "overworld" || isBedrockVersion(state.version) })
+    })
   );
 
   els.structList.innerHTML = "";

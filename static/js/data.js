@@ -39,24 +39,29 @@ const ICONS = {
   apple: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 8c3-3 8-1 8 5 0 5-3 8-6 8-1 0-1.5-.5-2-.5s-1 .5-2 .5c-3 0-6-3-6-8 0-6 5-8 8-5Z"/><path d="M12 8c0-3 2-5 5-5"/></svg>'
 };
 
+// Official cubiomes biome colors (cubiomes/util.c initBiomeColors), the same
+// palette mcseedmap.net credits as its source — in turn based on Amidst's
+// biome color table, tuned for clear contrast between neighboring biomes
+// rather than raw vanilla map-item colors.
 const BIOME_COLORS = {
-  0:"#0059d7",1:"#a4d34f",2:"#f8e283",3:"#709159",4:"#19792d",5:"#0d7a6e",
-  6:"#558e64",7:"#005fcc",8:"#ce382d",9:"#f2f4f3",10:"#57c2e4",11:"#a9e0e9",
-  12:"#dfe8eb",13:"#98a3bf",14:"#e1c9bb",15:"#d6ad7b",16:"#fdec9a",17:"#e8b73a",
-  18:"#226d22",19:"#0c625d",20:"#538e4b",21:"#139626",22:"#206e23",23:"#269c31",
-  24:"#0045a5",25:"#938c8c",26:"#bcdbd2",27:"#25b12b",28:"#06a906",29:"#276031",
-  30:"#00605d",31:"#024344",32:"#2b7631",33:"#1e5a20",34:"#649460",35:"#c8b615",
-  36:"#b6a605",37:"#c66631",38:"#c6541a",39:"#ab3c11",40:"#846fb2",41:"#a892d0",
-  42:"#ccbcef",43:"#6b598f",44:"#28a8dc",45:"#1985ca",
-  46:"#176ba5",47:"#074a9a",48:"#03357c",49:"#012660",50:"#021d4b",
-  51:"#59a739",52:"#339241",53:"#93b455",127:"#080808",
-  129:"#a4d34f",130:"#eab131",131:"#64845e",132:"#1ea623",133:"#0a6859",134:"#4c8161",
-  140:"#a6afc7",149:"#19a923",151:"#26992e",155:"#1ace22",156:"#05c508",157:"#216322",
-  158:"#024d4b",160:"#3d7f3e",161:"#2a7530",162:"#528150",163:"#d9c811",164:"#beb708",
-  165:"#dd6523",166:"#bc5016",167:"#a9330c",168:"#26c929",169:"#189e1e",170:"#6a3e11",
-  171:"#a81d1d",172:"#176e6b",173:"#414258",174:"#528641",175:"#23ac6c",177:"#6cba3b",
-  178:"#55a652",179:"#e2ebed",180:"#cedce7",181:"#bdcedb",182:"#869f83",183:"#1c1c36",
-  184:"#288458",185:"#fcacc2",186:"#dde5e8",187:"#dcb40a"
+  0:"#000070",1:"#8DB360",2:"#FA9418",3:"#606060",4:"#056621",5:"#0B6A5F",
+  6:"#07F9B2",7:"#0000FF",8:"#572526",9:"#8080FF",10:"#7070D6",11:"#A0A0FF",
+  12:"#FFFFFF",13:"#A0A0A0",14:"#FF00FF",15:"#A000FF",16:"#FADE55",17:"#D25F12",
+  18:"#22551C",19:"#163933",20:"#72789A",21:"#507B0A",22:"#2C4205",23:"#60930F",
+  24:"#000030",25:"#A2A284",26:"#FAF0C0",27:"#307444",28:"#1F5F32",29:"#40511A",
+  30:"#31554A",31:"#243F36",32:"#596651",33:"#454F3E",34:"#5B7352",35:"#BDB25F",
+  36:"#A79D64",37:"#D94515",38:"#B09765",39:"#CA8C65",40:"#4B4BAB",41:"#C9C959",
+  42:"#B5B536",43:"#7070CC",44:"#0000AC",45:"#000090",46:"#202070",47:"#000050",
+  48:"#000040",49:"#202038",50:"#404090",51:"#2F560F",52:"#47840E",53:"#789E31",
+  127:"#000000",129:"#B5DB88",130:"#FFBC40",131:"#888888",132:"#2D8E49",
+  133:"#339287",134:"#2FFFDA",140:"#B4DCDC",149:"#78A332",151:"#88BB37",
+  155:"#589C6C",156:"#47875A",157:"#687942",158:"#597D72",160:"#818E79",
+  161:"#6D7766",162:"#839B7A",163:"#E5DA87",164:"#CFC58C",165:"#FF6D3D",
+  166:"#D8BF8D",167:"#F2B48D",168:"#849500",169:"#5C6C04",170:"#4D3A2E",
+  171:"#981A11",172:"#49907B",173:"#645F63",174:"#4E3012",175:"#283C00",
+  177:"#60A445",178:"#47726C",179:"#C4C4C4",180:"#DCDCC8",181:"#B0B3CE",
+  182:"#7B8F74",183:"#031F29",184:"#2CCC8E",185:"#FF91C8",186:"#696D95",
+  187:"#D4A017"
 };
 
 function hexToRgb(hex) {
@@ -64,7 +69,27 @@ function hexToRgb(hex) {
   return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
 }
 
-const BIOME_RGB = new Map(Object.entries(BIOME_COLORS).map(([id, hex]) => [Number(id), hexToRgb(hex)]));
+function clamp8(v) {
+  return v < 0 ? 0 : v > 255 ? 255 : v | 0;
+}
+
+// A light saturation/brightness lift once at load time, so per-pixel
+// rendering only has to do a cheap multiply (see tintBiome) instead of
+// repeating this math per pixel. Kept subtle now that BIOME_COLORS is the
+// cubiomes/Amidst palette, which is already tuned for contrast — boosting it
+// hard (like a raw vanilla palette needs) would just wash it out.
+function vividRgb([r, g, b]) {
+  const avg = (r + g + b) / 3;
+  const sat = 1.1;
+  const bright = 1.03;
+  return [
+    clamp8((avg + (r - avg) * sat) * bright),
+    clamp8((avg + (g - avg) * sat) * bright),
+    clamp8((avg + (b - avg) * sat) * bright),
+  ];
+}
+
+const BIOME_RGB = new Map(Object.entries(BIOME_COLORS).map(([id, hex]) => [Number(id), vividRgb(hexToRgb(hex))]));
 
 const BIOME_NAMES = {
   0:"Ocean",1:"Plains",2:"Desert",3:"Mountains",4:"Forest",5:"Taiga",6:"Swamp",7:"River",

@@ -272,12 +272,6 @@ const WATER_BIOMES = new Set([
   40, 41, 42, 43,                // End biomes (not water but irrelevant context)
   44, 45, 46, 47, 48, 49, 50,   // Warm/Lukewarm/Cold/Deep Ocean variants
 ]);
-const RENDER_WATER_BIOMES = new Set([0, 7, 10, 11, 24, 44, 45, 46, 47, 48, 49, 50]);
-const DEEP_WATER_BIOMES = new Set([24, 47, 48, 49, 50]);
-const BEACH_BIOMES = new Set([16, 26]);
-const SAND_BIOMES = new Set([2, 16, 17, 26, 130]);
-const DRY_BIOMES = new Set([35, 36, 37, 38, 39, 163, 164, 165, 166, 167]);
-const FOREST_BIOMES = new Set([4, 18, 21, 27, 28, 29, 32, 33, 132, 155, 156, 157, 168, 169, 185]);
 
 function smoothBiomeGrid(grid, s) {
   if (!grid || grid.length !== s * s) return grid;
@@ -324,81 +318,21 @@ function createTile(grid, lod, tx, tz, bitmap = null) {
   let lx = 0, lz = 0, j = 0;
   for (let i = 0; i < displayGrid.length; i++, j += 4) {
     const biomeId = displayGrid[i];
-    const worldX = baseX + lx * sc;
-    const worldZ = baseZ + lz * sc;
     if (allVis) {
       const rgb = BIOME_RGB.get(biomeId) || UNKNOWN_BIOME_RGB;
-      applyStylizedBiomePixel(data, j, rgb, displayGrid, s, lx, lz, worldX, worldZ, biomeId);
-    } else {
-      const color = biomePixelColor(biomeId, worldX, worldZ);
+      let color = tintBiome(rgb, (baseX + lx * sc) >> 4, (baseZ + lz * sc) >> 4, biomeId);
+      color = applyBevel(color, edgeBevelDelta(displayGrid, s, i, lx, lz, biomeId));
       data[j] = (color >> 16) & 255; data[j + 1] = (color >> 8) & 255; data[j + 2] = color & 255;
-      data[j + 3] = 255;
+    } else {
+      let color = biomePixelColor(biomeId, baseX + lx * sc, baseZ + lz * sc);
+      color = applyBevel(color, edgeBevelDelta(displayGrid, s, i, lx, lz, biomeId));
+      data[j] = (color >> 16) & 255; data[j + 1] = (color >> 8) & 255; data[j + 2] = color & 255;
     }
+    data[j + 3] = 255;
     if (++lx === s) { lx = 0; lz++; }
   }
-  softenBiomePixels(data, s, 0.16);
   c.putImageData(img, 0, 0);
-  const canvas = upscaleBiomeCanvas(cnv, s, BIOME_TILE_RENDER_SCALE);
-  return { canvas, grid, displayGrid, lod, tx, tz, samples: s, scale: cfg.scale, blocks: cfg.blocks, last: performance.now() };
-}
-
-function upscaleBiomeCanvas(source, samples, scale) {
-  if (scale <= 1) return source;
-  const sourceCtx = source.getContext("2d", { alpha: false });
-  if (!sourceCtx) return source;
-  const sourceData = sourceCtx.getImageData(0, 0, samples, samples).data;
-  const size = samples * scale;
-  const out = document.createElement("canvas");
-  out.width = size;
-  out.height = size;
-  const outCtx = out.getContext("2d", { alpha: false });
-  if (!outCtx) return source;
-  const outImg = outCtx.createImageData(size, size);
-  const outData = outImg.data;
-  for (let y = 0; y < size; y++) {
-    const sy = (y + 0.5) / scale - 0.5;
-    const y0 = Math.max(0, Math.min(samples - 1, Math.floor(sy)));
-    const y1 = Math.max(0, Math.min(samples - 1, y0 + 1));
-    const ty = sy <= 0 || y0 === y1 ? 0 : sy - y0;
-    for (let x = 0; x < size; x++) {
-      const sx = (x + 0.5) / scale - 0.5;
-      const x0 = Math.max(0, Math.min(samples - 1, Math.floor(sx)));
-      const x1 = Math.max(0, Math.min(samples - 1, x0 + 1));
-      const tx = sx <= 0 || x0 === x1 ? 0 : sx - x0;
-      const i00 = (y0 * samples + x0) * 4;
-      const i10 = (y0 * samples + x1) * 4;
-      const i01 = (y1 * samples + x0) * 4;
-      const i11 = (y1 * samples + x1) * 4;
-      const outI = (y * size + x) * 4;
-      for (let c = 0; c < 3; c++) {
-        const top = sourceData[i00 + c] + (sourceData[i10 + c] - sourceData[i00 + c]) * tx;
-        const bottom = sourceData[i01 + c] + (sourceData[i11 + c] - sourceData[i01 + c]) * tx;
-        outData[outI + c] = top + (bottom - top) * ty;
-      }
-      outData[outI + 3] = 255;
-    }
-  }
-  softenBiomePixels(outData, size, 0.34);
-  outCtx.putImageData(outImg, 0, 0);
-  return out;
-}
-
-function softenBiomePixels(data, size, amount = 0.22) {
-  const copy = new Uint8ClampedArray(data);
-  const keep = 1 - amount;
-  for (let y = 1; y < size - 1; y++) {
-    for (let x = 1; x < size - 1; x++) {
-      const i = (y * size + x) * 4;
-      const n = ((y - 1) * size + x) * 4;
-      const s = ((y + 1) * size + x) * 4;
-      const w = (y * size + x - 1) * 4;
-      const e = (y * size + x + 1) * 4;
-      for (let c = 0; c < 3; c++) {
-        const avg = (copy[i + c] * 4 + copy[n + c] + copy[s + c] + copy[w + c] + copy[e + c]) / 8;
-        data[i + c] = copy[i + c] * keep + avg * amount;
-      }
-    }
-  }
+  return { canvas: cnv, grid, displayGrid, lod, tx, tz, samples: s, scale: cfg.scale, blocks: cfg.blocks, last: performance.now() };
 }
 
 function surfaceBiomeGrid(grid, samples) {
@@ -436,7 +370,7 @@ function allBiomesVisible() {
 function biomePixelColor(biomeId, worldX, worldZ) {
   const rgb = BIOME_RGB.get(biomeId) || UNKNOWN_BIOME_RGB;
   if (state.biomeVis[String(biomeId)] !== false) {
-    return tintBiome(rgb, worldX, worldZ, biomeId);
+    return tintBiome(rgb, worldX >> 4, worldZ >> 4, biomeId);
   }
   const shade = 20 + ((Math.abs((worldX >> 5) + (worldZ >> 5)) % 2) * 7);
   return (shade << 16) | ((shade + 4) << 8) | (shade + 8);
@@ -452,137 +386,143 @@ function rebuildBiomeTileCanvases() {
   requestRender();
 }
 
-function tintBiome(rgb, worldX, worldZ, biomeId) {
-  const [r, g, b] = stylizedBiomeRgb(rgb, worldX, worldZ, biomeId);
-  return (r << 16) | (g << 8) | b;
+// Water/void biomes stay flat-shaded so oceans read as smooth rather than noisy.
+const RELIEF_FLAT_BIOMES = new Set([0, 7, 10, 11, 24, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 127]);
+// Lattice spacing for the fake heightmap, in chunks (broad hills + finer
+// detail octave). A single bilinear-noise octave alone looks like a grid of
+// perfectly round "bullseye" bumps — both terrainHeight and contourHeight
+// blend in the fine octave (contourHeight more lightly) to break that up.
+const RELIEF_CELL = 9;
+const RELIEF_CELL_FINE = 4;
+
+function latticeNoise(gx, gz, salt) {
+  let v = Math.imul((gx + salt) ^ 0x27d4eb2d, 0x85ebca6b) ^ Math.imul((gz - salt) ^ 0xc2b2ae35, 0x165667b1);
+  v ^= v >>> 13;
+  v = Math.imul(v, 0x27d4eb2d);
+  v ^= v >>> 16;
+  return (v >>> 0) / 4294967295;
 }
 
-function stylizedBiomeRgb(rgb, worldX, worldZ, biomeId) {
-  const n1 = smoothTerrainNoise(worldX >> 5, worldZ >> 5) - 0.5;
-  const n2 = smoothTerrainNoise(worldX >> 8, worldZ >> 8) - 0.5;
-  const n3 = smoothTerrainNoise(worldX >> 3, worldZ >> 3) - 0.5;
-  const fakeRelief = smoothTerrainNoise((worldX - 48) >> 5, (worldZ - 48) >> 5) -
-    smoothTerrainNoise((worldX + 48) >> 5, (worldZ + 48) >> 5);
+function smoothstep(t) {
+  return t * t * (3 - 2 * t);
+}
+
+function latticeHeight(cx, cz, cell, salt) {
+  const gx = Math.floor(cx / cell);
+  const gz = Math.floor(cz / cell);
+  const fx = smoothstep((cx - gx * cell) / cell);
+  const fz = smoothstep((cz - gz * cell) / cell);
+  const h00 = latticeNoise(gx, gz, salt);
+  const h10 = latticeNoise(gx + 1, gz, salt);
+  const h01 = latticeNoise(gx, gz + 1, salt);
+  const h11 = latticeNoise(gx + 1, gz + 1, salt);
+  const top = h00 + (h10 - h00) * fx;
+  const bot = h01 + (h11 - h01) * fx;
+  return top + (bot - top) * fz;
+}
+
+// Cubiomes only exposes biome ids (no real heightmap), so we fake one: two
+// bilinear-interpolated value-noise lattices (broad hills + finer detail)
+// blended together give rolling terrain instead of per-block static.
+// Coordinates are chunk-scale (world >> 4).
+function terrainHeight(cx, cz) {
+  return latticeHeight(cx, cz, RELIEF_CELL, 0) * 0.72 + latticeHeight(cx, cz, RELIEF_CELL_FINE, 97) * 0.28;
+}
+
+// Contour lines (see buildReliefTile below) lean much more heavily on the
+// broad octave than the pixel shading does — enough fine detail to avoid the
+// single-octave "bullseye" look, but not so much that lines turn into dense
+// hatching.
+function contourHeight(cx, cz) {
+  return latticeHeight(cx, cz, RELIEF_CELL, 0) * 0.85 + latticeHeight(cx, cz, RELIEF_CELL_FINE, 97) * 0.15;
+}
+
+// Hypsometric color ramp: a light elevation-based tint (green low, tan/khaki
+// mid, gray/white high) layered on top of the biome color, not replacing it.
+// mcseedmap (and Amidst, whose palette BIOME_COLORS now uses) keep biome
+// color as the primary signal and treat terrain/contour as a secondary
+// overlay — a high RELIEF_TINT_WEIGHT here washed every biome into the same
+// look, which is exactly what looked "broken".
+const RELIEF_TINT_WEIGHT = 0.36;
+
+// mcseedmap's default render mode is a "stepped" shader (posterized elevation
+// bands) plus a "simple" contour overlay, not a smooth continuous gradient —
+// that's what gives its terrain a hand-engraved/terraced look instead of an
+// airbrushed one. We approximate that by posterizing the ramp/light input to
+// the same RELIEF_LINE_STEP bands the contour Path2D is traced from (see
+// buildReliefTile below), so the flat "steps" line up with the drawn contour
+// strokes instead of just being a smooth gradient underneath them.
+function posterize(h) {
+  return (Math.floor(h / RELIEF_LINE_STEP) + 0.5) * RELIEF_LINE_STEP;
+}
+
+// Hillshade + hypsometric ramp from the fake heightmap. The topographic
+// contour lines are drawn separately as a vector overlay (see
+// buildReliefTile/drawReliefContours) so this only needs to do slope
+// lighting, not its own banding. Written as scalar math with no intermediate
+// objects/arrays (this runs per pixel while a tile is being built, so
+// allocations here turn into GC churn).
+function tintBiome(rgb, cx, cz, biomeId) {
   let r = rgb[0], g = rgb[1], b = rgb[2];
-  let contrast = 1 + n1 * 0.08 + n2 * 0.06;
-  let lift = n2 * 5 + n3 * 2;
+  if (!RELIEF_FLAT_BIOMES.has(biomeId)) {
+    // Ramp/banding comes from the same broad-octave field the contour lines
+    // trace (contourHeight), posterized to that field's step size, so band
+    // edges land exactly on drawn contour strokes.
+    const h = posterize(contourHeight(cx, cz));
+    // Slope light stays on the finer terrainHeight field (unposterized) so
+    // each flat band still gets subtle directional shading instead of
+    // reading as a dead-flat cutout.
+    const th = terrainHeight(cx, cz);
+    const thx = terrainHeight(cx + 1, cz);
+    const thz = terrainHeight(cx, cz + 1);
+    let light = 1 + (th - thx) * 2.9 + (th - thz) * 2.1;
+    light = light < 0.42 ? 0.42 : light > 1.4 ? 1.4 : light;
 
-  if (RENDER_WATER_BIOMES.has(biomeId)) {
-    contrast = 1 + n1 * 0.045;
-    lift = DEEP_WATER_BIOMES.has(biomeId) ? -14 + n2 * 3 : -2 + n2 * 3;
-    r = mixChannel(r, 22, 0.3);
-    g = mixChannel(g, 108, 0.24);
-    b = mixChannel(b, 182, 0.22);
-  } else if (SAND_BIOMES.has(biomeId)) {
-    r = mixChannel(r, 225, 0.22);
-    g = mixChannel(g, 198, 0.18);
-    b = mixChannel(b, 121, 0.12);
-    contrast = 1 + n1 * 0.06;
-    lift += 2;
-  } else if (DRY_BIOMES.has(biomeId)) {
-    r = mixChannel(r, 183, 0.22);
-    g = mixChannel(g, 155, 0.18);
-    b = mixChannel(b, 72, 0.16);
-    contrast = 1 + n1 * 0.055;
-    lift -= 1;
-  } else if (FOREST_BIOMES.has(biomeId)) {
-    r = mixChannel(r, 52, 0.16);
-    g = mixChannel(g, 118, 0.16);
-    b = mixChannel(b, 56, 0.10);
-    lift -= 3;
-    contrast = 1 + n1 * 0.10 + n2 * 0.06;
-  } else {
-    r = mixChannel(r, 134, 0.08);
-    g = mixChannel(g, 174, 0.10);
-    b = mixChannel(b, 78, 0.08);
-  }
-
-  if (!RENDER_WATER_BIOMES.has(biomeId)) {
-    const relief = fakeRelief * 22 + n1 * 5;
-    r += relief * 0.9;
-    g += relief * 0.72;
-    b += relief * 0.42;
-  }
-
-  return [
-    clampByte(r * contrast + lift),
-    clampByte(g * contrast + lift),
-    clampByte(b * contrast + lift)
-  ];
-}
-
-function applyStylizedBiomePixel(data, j, rgb, grid, s, x, z, worldX, worldZ, biomeId) {
-  const water = RENDER_WATER_BIOMES.has(biomeId);
-  const waterDist = nearbyBiomeDistance(grid, s, x, z, id => RENDER_WATER_BIOMES.has(id), 3);
-  const landDist = nearbyBiomeDistance(grid, s, x, z, id => !RENDER_WATER_BIOMES.has(id), 3);
-  const besideWater = waterDist > 0;
-  const besideLand = landDist > 0;
-  let [r, g, b] = stylizedBiomeRgb(rgb, worldX, worldZ, biomeId);
-
-  if (water && besideLand) {
-    const t = landDist === 1 ? 0.38 : landDist === 2 ? 0.22 : 0.12;
-    r = mixChannel(r, 62, t);
-    g = mixChannel(g, 166, t);
-    b = mixChannel(b, 204, t * 0.88);
-  } else if (!water && besideWater) {
-    const shore = waterDist === 1 ? 0.36 : waterDist === 2 ? 0.2 : 0.1;
-    const beachTint = BEACH_BIOMES.has(biomeId) || SAND_BIOMES.has(biomeId) ? shore * 1.2 : shore;
-    r = mixChannel(r, 225, beachTint);
-    g = mixChannel(g, 199, beachTint * 0.92);
-    b = mixChannel(b, 128, beachTint * 0.62);
-  }
-
-  const edge = biomeEdgeStrength(grid, s, x, z, biomeId);
-  if (edge && !water) {
-    const shade = 1 - edge * 0.07;
-    r *= shade; g *= shade; b *= shade;
-  }
-
-  data[j] = clampByte(r);
-  data[j + 1] = clampByte(g);
-  data[j + 2] = clampByte(b);
-  data[j + 3] = 255;
-}
-
-function nearbyBiome(grid, s, x, z, predicate) {
-  if (x > 0 && predicate(grid[z * s + x - 1])) return true;
-  if (x + 1 < s && predicate(grid[z * s + x + 1])) return true;
-  if (z > 0 && predicate(grid[(z - 1) * s + x])) return true;
-  if (z + 1 < s && predicate(grid[(z + 1) * s + x])) return true;
-  return false;
-}
-
-function nearbyBiomeDistance(grid, s, x, z, predicate, maxRadius) {
-  for (let radius = 1; radius <= maxRadius; radius++) {
-    for (let dz = -radius; dz <= radius; dz++) {
-      const nz = z + dz;
-      if (nz < 0 || nz >= s) continue;
-      for (let dx = -radius; dx <= radius; dx++) {
-        if (Math.abs(dx) !== radius && Math.abs(dz) !== radius) continue;
-        const nx = x + dx;
-        if (nx < 0 || nx >= s) continue;
-        if (predicate(grid[nz * s + nx])) return radius;
-      }
+    let rr, rg, rb;
+    if (h < 0.28) {
+      const t = h / 0.28;
+      rr = 46 + (132 - 46) * t; rg = 74 + (156 - 74) * t; rb = 44 + (92 - 44) * t;
+    } else if (h < 0.46) {
+      const t = (h - 0.28) / 0.18;
+      rr = 132 + (196 - 132) * t; rg = 156 + (182 - 156) * t; rb = 92 + (132 - 92) * t;
+    } else if (h < 0.64) {
+      const t = (h - 0.46) / 0.18;
+      rr = 196 + (180 - 196) * t; rg = 182 + (168 - 182) * t; rb = 132 + (146 - 132) * t;
+    } else if (h < 0.8) {
+      const t = (h - 0.64) / 0.16;
+      rr = 180 + (206 - 180) * t; rg = 168 + (206 - 168) * t; rb = 146 + (202 - 146) * t;
+    } else {
+      const t = Math.min(1, (h - 0.8) / 0.2);
+      rr = 206 + (240 - 206) * t; rg = 206 + (240 - 206) * t; rb = 202 + (238 - 202) * t;
     }
+
+    r = r + (rr - r) * RELIEF_TINT_WEIGHT;
+    g = g + (rg - g) * RELIEF_TINT_WEIGHT;
+    b = b + (rb - b) * RELIEF_TINT_WEIGHT;
+    r *= light; g *= light; b *= light;
   }
-  return 0;
+  return (clamp8(r) << 16) | (clamp8(g) << 8) | clamp8(b);
 }
 
-function biomeEdgeStrength(grid, s, x, z, id) {
-  let edge = 0;
-  if (x > 0 && grid[z * s + x - 1] !== id) edge++;
-  if (x + 1 < s && grid[z * s + x + 1] !== id) edge++;
-  if (z > 0 && grid[(z - 1) * s + x] !== id) edge++;
-  if (z + 1 < s && grid[(z + 1) * s + x] !== id) edge++;
-  return Math.min(1, edge / 3);
+// Emboss biome borders (coastlines, mountain edges, ...) with a cheap
+// highlight/shadow rim so patch boundaries read as raised/sunken terrain
+// rather than flat cutouts. `grid`/`s`/`i` come from the tile's own pixel
+// loop, so this is just a handful of array reads, no extra tile fetches.
+function edgeBevelDelta(grid, s, i, lx, lz, biomeId) {
+  let d = 0;
+  if (lz > 0 && grid[i - s] !== biomeId) d += 16;
+  if (lx > 0 && grid[i - 1] !== biomeId) d += 16;
+  if (lz < s - 1 && grid[i + s] !== biomeId) d -= 16;
+  if (lx < s - 1 && grid[i + 1] !== biomeId) d -= 16;
+  return d;
 }
 
-function mixChannel(a, b, t) {
-  return a + (b - a) * t;
-}
-
-function clampByte(v) {
-  return Math.max(0, Math.min(255, Math.round(v)));
+function applyBevel(color, delta) {
+  if (!delta) return color;
+  const r = clamp8(((color >> 16) & 255) + delta);
+  const g = clamp8(((color >> 8) & 255) + delta);
+  const b = clamp8((color & 255) + delta);
+  return (r << 16) | (g << 8) | b;
 }
 
 function highlightedBiomeColor(color, biomeId, worldX, worldZ) {
@@ -606,182 +546,178 @@ function mixPackedColor(a, b, t) {
     (ab + (bb - ab) * t);
 }
 
-function smoothTerrainNoise(x, z) {
-  const center = terrainNoise(x, z) * 4;
-  const edges =
-    terrainNoise(x - 1, z) +
-    terrainNoise(x + 1, z) +
-    terrainNoise(x, z - 1) +
-    terrainNoise(x, z + 1);
-  const corners =
-    terrainNoise(x - 1, z - 1) +
-    terrainNoise(x + 1, z - 1) +
-    terrainNoise(x - 1, z + 1) +
-    terrainNoise(x + 1, z + 1);
-  return (center + edges * 2 + corners) / 16;
-}
-
-function terrainNoise(x, z) {
-  let v = Math.imul(x ^ 0x45d9f3b, 0x27d4eb2d) ^ Math.imul(z ^ 0x119de1f3, 0x165667b1);
-  v ^= v >>> 15;
-  return ((v >>> 0) % 1000) / 1000;
-}
-
 function pruneTileCache() {
   if (state.tiles.size <= MAX_TILE_CACHE) return;
   const sorted = [...state.tiles.entries()].sort((a, b) => a[1].last - b[1].last);
   for (let i = 0; i < sorted.length - MAX_TILE_CACHE; i++) state.tiles.delete(sorted[i][0]);
+  pruneReliefTiles();
 }
 
-// Whether height data (hillshade + contour lines) is available at all for
-// the current world. Independent of the "Contour Lines" toggle, which only
-// controls whether the line strokes themselves are drawn — the hillshade
-// stays on regardless so turning lines off doesn't also flatten the relief.
-function reliefDataActive() {
-  return state.dimension === "overworld" &&
-    !isBedrockVersion(state.version) && dimensionCaps().heights;
+// --- Topographic contour-line overlay -------------------------------------
+// Real cubiomes data has no heightmap, so contour lines are traced from the
+// same fake `contourHeight` field used for hillshading (broad octave only —
+// see contourHeight above), via marching squares. Unlike the per-pixel
+// shading, these are vector line segments (a Path2D per tile) stroked at a
+// fixed 1 CSS-pixel width regardless of zoom, so they stay thin and smooth
+// instead of looking like blocky pixel noise.
+//
+// Contour tiles piggyback on the already-fetched LOD0 biome tile (same
+// 256-block footprint) for two things: they only get built once that tile's
+// biome grid is cached (no extra network fetches), and they use its grid to
+// mask contour lines to land only (oceans/rivers stay clean).
+const RELIEF_GRID_N = 16;         // marching-squares cells per axis per tile
+const RELIEF_LINE_STEP = 0.08;    // contour spacing on the 0..1 height scale — wider gaps, fewer lines
+const RELIEF_BUILD_BUDGET = 6;    // tiles built per frame while panning/zooming
+const MAX_RELIEF_TILE_CACHE = 400;
+const reliefTiles = new Map();
+// Reused scratch buffers for buildReliefTile — every entry gets overwritten
+// before it's read on each call, and builds run synchronously one at a time,
+// so reuse is safe and avoids allocating two new TypedArrays per tile.
+const RELIEF_PTS = RELIEF_GRID_N + 1;
+const reliefHeightScratch = new Float32Array(RELIEF_PTS * RELIEF_PTS);
+const reliefLandScratch = new Uint8Array(RELIEF_PTS * RELIEF_PTS);
+
+function reliefKey(tx, tz) {
+  return `${tx},${tz}`;
 }
 
-// Requests a 2-sample halo around the tile: one ring for the hillshade's 3x3
-// smoothing, one more for the gradient after that, so both read real
-// neighboring terrain instead of a clamped edge — otherwise adjacent tiles'
-// shading disagrees right at the boundary (a visible seam).
-const HEIGHT_HALO = 2;
+function biomeGridSample(tile, blockX, blockZ) {
+  const s = tile.samples;
+  const grid = tile.displayGrid || tile.grid;
+  const sx = Math.min(s - 1, Math.max(0, Math.round(blockX / tile.scale)));
+  const sz = Math.min(s - 1, Math.max(0, Math.round(blockZ / tile.scale)));
+  return grid[sz * s + sx];
+}
 
-function heightSampleDiv() {
-  for (const tier of HEIGHT_SAMPLE_DIV_TIERS) {
-    if (state.zoom <= tier.maxZoom) return tier.div;
+function frac(t, va, vb) {
+  return va !== vb ? (t - va) / (vb - va) : 0.5;
+}
+
+// Standard marching-squares single-level cell trace (corners: top-left,
+// top-right, bottom-right, bottom-left). Complementary cases (c and 15-c)
+// produce the same boundary line, so only 8 distinct patterns are needed.
+// Edge points are computed inline (no per-call closures/arrays) since this
+// runs for every contour crossing in every cell of every tile being built.
+function marchCell(path, tl, tr, br, bl, x0, z0, x1, z1, t) {
+  const idx = (tl >= t ? 8 : 0) | (tr >= t ? 4 : 0) | (br >= t ? 2 : 0) | (bl >= t ? 1 : 0);
+  if (idx === 0 || idx === 15) return;
+  const dx = x1 - x0, dz = z1 - z0;
+  switch (idx) {
+    case 1: case 14:
+      path.moveTo(x0, z0 + dz * frac(t, tl, bl));
+      path.lineTo(x0 + dx * frac(t, bl, br), z1);
+      break;
+    case 2: case 13:
+      path.moveTo(x0 + dx * frac(t, bl, br), z1);
+      path.lineTo(x1, z0 + dz * frac(t, tr, br));
+      break;
+    case 3: case 12:
+      path.moveTo(x0, z0 + dz * frac(t, tl, bl));
+      path.lineTo(x1, z0 + dz * frac(t, tr, br));
+      break;
+    case 4: case 11:
+      path.moveTo(x0 + dx * frac(t, tl, tr), z0);
+      path.lineTo(x1, z0 + dz * frac(t, tr, br));
+      break;
+    case 6: case 9:
+      path.moveTo(x0 + dx * frac(t, tl, tr), z0);
+      path.lineTo(x0 + dx * frac(t, bl, br), z1);
+      break;
+    case 7: case 8:
+      path.moveTo(x0 + dx * frac(t, tl, tr), z0);
+      path.lineTo(x0, z0 + dz * frac(t, tl, bl));
+      break;
+    case 5:
+      path.moveTo(x0 + dx * frac(t, tl, tr), z0);
+      path.lineTo(x1, z0 + dz * frac(t, tr, br));
+      path.moveTo(x0 + dx * frac(t, bl, br), z1);
+      path.lineTo(x0, z0 + dz * frac(t, tl, bl));
+      break;
+    case 10:
+      path.moveTo(x0 + dx * frac(t, tl, tr), z0);
+      path.lineTo(x0, z0 + dz * frac(t, tl, bl));
+      path.moveTo(x0 + dx * frac(t, bl, br), z1);
+      path.lineTo(x1, z0 + dz * frac(t, tr, br));
+      break;
   }
-  return HEIGHT_SAMPLE_DIV_TIERS[HEIGHT_SAMPLE_DIV_TIERS.length - 1].div;
 }
 
-// Height tiles are keyed by resolution tier too — the same world tile at a
-// coarser div is different data, not a cache hit.
-function heightTileKey(lod, tx, tz) {
-  return `${tileKey(lod, tx, tz)}:${heightSampleDiv()}`;
-}
-
-function ensureHeightTile(lod, tx, tz) {
-  if (!reliefDataActive()) return;
-  const key = heightTileKey(lod, tx, tz);
-  if (state.heightTiles.has(key) || state.heightPending.has(key)) return;
-  if (state.heightPending.size >= MAX_HEIGHT_REQUESTS) return;
-  const cfg = LODS[lod];
-  const div = heightSampleDiv();
-  const hSamples = Math.max(8, Math.round(cfg.samples / div));
-  const hScale = Math.round(cfg.blocks / hSamples);
-  const padded = hSamples + HEIGHT_HALO * 2;
-  const runId = state.runId;
-  state.heightPending.add(key);
-  workerRequest("heightTile", {
-    seed: state.seed,
-    version: state.version,
-    x: tx * cfg.blocks - HEIGHT_HALO * hScale,
-    z: tz * cfg.blocks - HEIGHT_HALO * hScale,
-    w: padded,
-    h: padded,
-    scale: hScale
-  }).then(data => {
-    state.heightPending.delete(key);
-    if (runId !== state.runId || !data?.grid) return;
-    const grid = extractInnerGrid(data.grid, padded, hSamples, HEIGHT_HALO);
-    // mapApproxHeight is noisy at the block-by-block level (real terrain
-    // isn't, but this approximation has small spurious jitter). Building
-    // contours straight off the raw grid turns that jitter into a messy
-    // scribble; smoothing first gives clean, deliberate-looking bands.
-    const smoothed = smoothInnerGrid(data.grid, padded, hSamples, HEIGHT_HALO);
-    state.heightTiles.set(key, {
-      grid,
-      samples: hSamples,
-      scale: hScale,
-      lod, tx, tz,
-      last: performance.now(),
-      contourPath: buildContourPath(smoothed, hSamples, CONTOUR_INTERVAL),
-      shadeBitmap: data.shadeBitmap || null
-    });
-    pruneHeightTileCache();
-    requestRender();
-  }).catch(() => {
-    state.heightPending.delete(key);
-  });
-}
-
-function pruneHeightTileCache() {
-  if (state.heightTiles.size <= MAX_HEIGHT_TILE_CACHE) return;
-  const sorted = [...state.heightTiles.entries()].sort((a, b) => a[1].last - b[1].last);
-  for (let i = 0; i < sorted.length - MAX_HEIGHT_TILE_CACHE; i++) state.heightTiles.delete(sorted[i][0]);
-}
-
-function extractInnerGrid(padded, paddedSamples, innerSamples, margin) {
-  const out = new Float32Array(innerSamples * innerSamples);
-  for (let j = 0; j < innerSamples; j++) {
-    for (let i = 0; i < innerSamples; i++) {
-      out[j * innerSamples + i] = padded[(j + margin) * paddedSamples + (i + margin)];
+// Builds one tile's contour Path2D, or returns null if its biome tile isn't
+// cached yet (the caller retries later — cheap, just a Map lookup).
+function buildReliefTile(tx, tz) {
+  const biomeTile = state.tiles.get(tileKey(0, tx, tz));
+  if (!biomeTile) return null;
+  const blocks = LODS[0].blocks;
+  const chunkSize = blocks >> 4;
+  const n = RELIEF_GRID_N;
+  const cellChunks = chunkSize / n;
+  const baseCx = (tx * blocks) >> 4;
+  const baseCz = (tz * blocks) >> 4;
+  const baseX = tx * blocks;
+  const baseZ = tz * blocks;
+  const pts = n + 1;
+  const heights = reliefHeightScratch;
+  const land = reliefLandScratch;
+  for (let gz = 0; gz < pts; gz++) {
+    for (let gx = 0; gx < pts; gx++) {
+      const idx = gz * pts + gx;
+      heights[idx] = contourHeight(baseCx + gx * cellChunks, baseCz + gz * cellChunks);
+      const biomeId = biomeGridSample(biomeTile, Math.min(blocks, gx * cellChunks * 16), Math.min(blocks, gz * cellChunks * 16));
+      land[idx] = RELIEF_FLAT_BIOMES.has(biomeId) ? 0 : 1;
     }
   }
-  return out;
-}
-
-function smoothInnerGrid(padded, paddedSamples, innerSamples, margin) {
-  const out = new Float32Array(innerSamples * innerSamples);
-  for (let j = 0; j < innerSamples; j++) {
-    const z = j + margin;
-    for (let i = 0; i < innerSamples; i++) {
-      const x = i + margin;
-      let sum = 0;
-      for (let dz = -1; dz <= 1; dz++) {
-        const row = (z + dz) * paddedSamples;
-        sum += padded[row + x - 1] + padded[row + x] + padded[row + x + 1];
-      }
-      out[j * innerSamples + i] = sum / 9;
-    }
-  }
-  return out;
-}
-
-// Builds a Path2D of contour lines in grid-cell-index space (independent of
-// zoom/pan), so it can be cached per tile and only re-scaled when drawn.
-// Uses a lightweight marching-squares pass with edge interpolation: this keeps
-// the topographic lines from turning into thick stair-stepped biome borders.
-function buildContourPath(grid, samples, interval) {
   const path = new Path2D();
-  const contourValue = v => Math.floor(v / interval) * interval;
-  const addSegment = (a, b) => {
-    path.moveTo(a[0], a[1]);
-    path.lineTo(b[0], b[1]);
-  };
-  for (let z = 0; z < samples - 1; z++) {
-    for (let x = 0; x < samples - 1; x++) {
-      const i = z * samples + x;
-      const h00 = grid[i];
-      const h10 = grid[i + 1];
-      const h11 = grid[i + samples + 1];
-      const h01 = grid[i + samples];
-      const minH = Math.min(h00, h10, h11, h01);
-      const maxH = Math.max(h00, h10, h11, h01);
-      const start = Math.ceil(minH / interval) * interval;
-      for (let level = start; level < maxH; level += interval) {
-        if (level <= minH) continue;
-        const points = [];
-        if ((h00 < level) !== (h10 < level)) points.push(interpPoint(x, z, x + 1, z, h00, h10, level));
-        if ((h10 < level) !== (h11 < level)) points.push(interpPoint(x + 1, z, x + 1, z + 1, h10, h11, level));
-        if ((h11 < level) !== (h01 < level)) points.push(interpPoint(x + 1, z + 1, x, z + 1, h11, h01, level));
-        if ((h01 < level) !== (h00 < level)) points.push(interpPoint(x, z + 1, x, z, h01, h00, level));
-        if (points.length === 2) {
-          addSegment(points[0], points[1]);
-        } else if (points.length === 4) {
-          addSegment(points[0], points[1]);
-          addSegment(points[2], points[3]);
-        }
+  for (let gz = 0; gz < n; gz++) {
+    for (let gx = 0; gx < n; gx++) {
+      const i00 = gz * pts + gx;
+      const i10 = i00 + 1;
+      const i01 = i00 + pts;
+      const i11 = i01 + 1;
+      if (!land[i00] && !land[i10] && !land[i01] && !land[i11]) continue;
+      const tl = heights[i00], tr = heights[i10], bl = heights[i01], br = heights[i11];
+      const minV = Math.min(tl, tr, bl, br);
+      const maxV = Math.max(tl, tr, bl, br);
+      const lvl0 = Math.ceil(minV / RELIEF_LINE_STEP);
+      const lvl1 = Math.floor(maxV / RELIEF_LINE_STEP);
+      if (lvl0 > lvl1) continue;
+      const x0 = baseX + gx * cellChunks * 16;
+      const x1 = baseX + (gx + 1) * cellChunks * 16;
+      const z0 = baseZ + gz * cellChunks * 16;
+      const z1 = baseZ + (gz + 1) * cellChunks * 16;
+      for (let lvl = lvl0; lvl <= lvl1; lvl++) {
+        marchCell(path, tl, tr, br, bl, x0, z0, x1, z1, lvl * RELIEF_LINE_STEP);
       }
     }
   }
-  return path;
+  return { tx, tz, path, last: performance.now() };
 }
 
-function interpPoint(x1, z1, x2, z2, h1, h2, level) {
-  const t = h1 === h2 ? 0.5 : clamp((level - h1) / (h2 - h1), 0, 1);
-  return [x1 + (x2 - x1) * t, z1 + (z2 - z1) * t];
+// Builds any missing, currently-visible contour tiles, spending at most
+// RELIEF_BUILD_BUDGET per call so a big pan/zoom jump can't spike a frame.
+// Prunes its own cache independently of the biome-tile lifecycle, so it
+// can't grow unbounded even if biome tiles rarely churn.
+function pumpReliefTiles(range) {
+  let built = 0;
+  for (let tz = range.tzMin; tz <= range.tzMax; tz++) {
+    for (let tx = range.txMin; tx <= range.txMax; tx++) {
+      const key = reliefKey(tx, tz);
+      if (reliefTiles.has(key)) continue;
+      const tile = buildReliefTile(tx, tz);
+      if (!tile) continue;
+      reliefTiles.set(key, tile);
+      if (++built >= RELIEF_BUILD_BUDGET) {
+        pruneReliefTiles();
+        return;
+      }
+    }
+  }
+  if (built) pruneReliefTiles();
+}
+
+function pruneReliefTiles() {
+  if (reliefTiles.size <= MAX_RELIEF_TILE_CACHE) return;
+  const sorted = [...reliefTiles.entries()].sort((a, b) => a[1].last - b[1].last);
+  for (let i = 0; i < sorted.length - MAX_RELIEF_TILE_CACHE; i++) reliefTiles.delete(sorted[i][0]);
 }
 
 function versionAtLeast(version, minimum) {
