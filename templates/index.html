@@ -3,10 +3,6 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-<meta http-equiv="Pragma" content="no-cache">
-<meta http-equiv="Expires" content="0">
-<meta name="x-build-id" content="{{ build_id }}">
 <title>SeedMap</title>
 <link rel="stylesheet" href="{{ base_path }}/static/styles.css?v={{ cache_bust }}">
 </head>
@@ -206,7 +202,6 @@
       </div>
 
       <div class="floating toast" id="toast">Copied</div>
-      <div class="build-id" id="build-id">layered v10</div>
     </section>
 
     <!-- Seed Finder drawer — outside map-stage so overflow:hidden doesn't clip it -->
@@ -303,10 +298,6 @@
 <script>
 window.SEED_VIEWER_BASE_PATH = "{{ base_path }}";
 window.SEED_VIEWER_PERF_MODE = {{ perf_mode|tojson }};
-window.SEED_VIEWER_BUILD_ID = {{ build_id|tojson }};
-console.info("Seed Viewer build:", window.SEED_VIEWER_BUILD_ID);
-if ("serviceWorker" in navigator) { navigator.serviceWorker.getRegistrations().then(rs => rs.forEach(r => r.unregister())).catch(() => {}); }
-if ("caches" in window) { caches.keys().then(keys => keys.forEach(key => caches.delete(key))).catch(() => {}); }
 </script>
 <script src="{{ base_path }}/static/js/config.js?v={{ cache_bust }}"></script>
 <script src="{{ base_path }}/static/js/data.js?v={{ cache_bust }}"></script>
@@ -322,5 +313,3 @@ if ("caches" in window) { caches.keys().then(keys => keys.forEach(key => caches.
 <script src="{{ base_path }}/static/js/boot.js?v={{ cache_bust }}"></script>
 </body>
 </html>
-
-

@@ -1,4 +1,4 @@
-﻿:root {
+:root {
     color-scheme: dark;
     --bg: #070a0c;
     --panel: rgba(15, 18, 20, .94);
@@ -2713,7 +2713,7 @@
     }
   }
 
-  /* в”Ђв”Ђ Seed Finder Drawer в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ */
+  /* ── Seed Finder Drawer ───────────────────────────── */
   .finder-drawer {
     position: fixed !important;
     top: 48px !important;
@@ -2734,7 +2734,7 @@
     transform: translateX(100%) !important;
   }
 
-  /* Header вЂ” matches .section-title style */
+  /* Header — matches .section-title style */
   .finder-head {
     display: flex !important;
     align-items: center !important;
@@ -2804,7 +2804,7 @@
   .finder-scroll::-webkit-scrollbar { width: 4px; }
   .finder-scroll::-webkit-scrollbar-thumb { background: rgba(177,186,183,.3); border-radius: 4px; }
 
-  /* Section cards вЂ” same feel as .section */
+  /* Section cards — same feel as .section */
   .finder-section {
     display: grid !important;
     gap: 7px !important;
@@ -2864,7 +2864,7 @@
     text-transform: uppercase !important;
   }
 
-  /* Footer вЂ” flush to bottom, no extra gap */
+  /* Footer — flush to bottom, no extra gap */
   .finder-footer {
     flex-shrink: 0 !important;
     padding: 8px !important;
@@ -2947,7 +2947,7 @@
     font-weight: 800;
   }
 
-  /* в”Ђв”Ђ Tab pull-handle (always visible at right edge) в”Ђв”Ђ */
+  /* ── Tab pull-handle (always visible at right edge) ── */
   .finder-tab {
     position: fixed !important;
     right: 0 !important;
@@ -4643,7 +4643,7 @@
     min-height: 38px !important;
   }
 
-  /* в”Ђв”Ђ Exact left-sidebar match: colors + width в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ */
+  /* ── Exact left-sidebar match: colors + width ─────────── */
   .finder-drawer {
     --finder-accent: var(--ui-blue);
     --finder-accent-soft: rgba(22,135,255,.15);
@@ -4787,7 +4787,7 @@
     border-color: rgba(22,135,255,.38) !important;
   }
 
-  /* Single-column biome chips вЂ” matches structure list style */
+  /* Single-column biome chips — matches structure list style */
   .finder-biome-list {
     grid-template-columns: 1fr !important;
     max-height: 200px !important;
@@ -4811,7 +4811,7 @@
     }
   }
 
-  /* в”Ђв”Ђ Visual polish в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ */
+  /* ── Visual polish ──────────────────────────────────────── */
 
   /* Header: gradient accent strip on top */
   .finder-head {
@@ -4881,7 +4881,7 @@
     box-shadow: 0 4px 12px rgba(22,135,255,.28) !important;
   }
 
-  /* Chips вЂ” more visual weight */
+  /* Chips — more visual weight */
   .finder-chip {
     min-height: 40px !important;
     padding: 6px 10px 6px 6px !important;
@@ -4900,7 +4900,7 @@
     box-shadow: 0 2px 12px color-mix(in srgb, var(--chip), transparent 82%) !important;
   }
 
-  /* Biome color swatch вЂ” round pill */
+  /* Biome color swatch — round pill */
   .finder-chip-dot {
     width: 18px !important;
     height: 18px !important;
@@ -4952,7 +4952,7 @@
     border-color: rgba(255,255,255,.28) !important;
   }
 
-  /* Remove (в€’) button */
+  /* Remove (−) button */
   .finder-chip-minus {
     border-radius: 7px !important;
     background: rgba(20,19,36,.95) !important;
@@ -5082,7 +5082,7 @@
     border-radius: 7px !important;
   }
 
-  /* в”Ђв”Ђ Responsive: narrow screens в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ */
+  /* ── Responsive: narrow screens ─────────────────────────── */
 
   /* 1180px: finder fits but reduce width */
   @media (max-width: 1180px) {
@@ -5091,7 +5091,7 @@
     }
   }
 
-  /* 1020px: map gets very tight вЂ” hide finder by default, only tab visible */
+  /* 1020px: map gets very tight — hide finder by default, only tab visible */
   @media (max-width: 1020px) {
     .finder-drawer {
       width: 100% !important;
@@ -5123,7 +5123,7 @@
     }
   }
 
-  /* 700px: left sidebar collapsed вЂ” only show toggle, map takes full screen */
+  /* 700px: left sidebar collapsed — only show toggle, map takes full screen */
   @media (max-width: 700px) {
     .layout::before {
       display: none !important;
@@ -6822,23 +6822,3 @@
   .favorite-seed-actions {
     gap: 8px !important;
   }
-
-/* Build marker used to verify Heroku is serving the latest slug. */
-.build-id {
-  position: absolute;
-  right: 10px;
-  bottom: 10px;
-  z-index: 40;
-  padding: 4px 7px;
-  color: rgba(255,255,255,.78);
-  background: rgba(0,0,0,.48);
-  border: 1px solid rgba(255,255,255,.14);
-  border-radius: 4px;
-  font: 800 10px Inter, system-ui, sans-serif;
-  pointer-events: none;
-}
-
-@media (max-width: 760px) {
-  .build-id { display: none; }
-}
-

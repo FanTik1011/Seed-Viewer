@@ -24,7 +24,6 @@ function render() {
   if (detailedBiomes) {
     drawBiomes(range, !pauseBiomeLoading);
     drawHighlightedBiome(range);
-    drawReliefContours(!pauseBiomeLoading);
     if (!pauseBiomeLoading) prefetchAround(range);
     drawMapVignette();
   } else {
@@ -255,43 +254,6 @@ function drawLoadedTileOutline(range) {
 
 function drawMapVignette() {
 
-}
-
-// Draws cached topographic contour lines (see tile-stream.js) as thin vector
-// strokes, using a temporary world->device transform so the Path2D built in
-// world-block coordinates lands in the right place at any zoom/pan. This is
-// restored right after, so it doesn't affect any other draw call this frame.
-function drawReliefContours(canBuild) {
-  const b = LODS[0].blocks;
-  const tl = screenToWorld(0, 0);
-  const br = screenToWorld(state.width, state.height);
-  const range = {
-    txMin: Math.floor(tl.x / b) - 1,
-    txMax: Math.floor(br.x / b) + 1,
-    tzMin: Math.floor(tl.z / b) - 1,
-    tzMax: Math.floor(br.z / b) + 1
-  };
-  if (canBuild) pumpReliefTiles(range);
-
-  ctx.save();
-  const s = state.dpr / state.zoom;
-  ctx.setTransform(
-    s, 0, 0, s,
-    state.dpr * (state.width / 2 - state.viewX / state.zoom),
-    state.dpr * (state.height / 2 - state.viewZ / state.zoom)
-  );
-  ctx.lineWidth = state.zoom;
-  ctx.strokeStyle = "rgba(18,24,20,.32)";
-  ctx.lineJoin = "round";
-  for (let tz = range.tzMin; tz <= range.tzMax; tz++) {
-    for (let tx = range.txMin; tx <= range.txMax; tx++) {
-      const tile = reliefTiles.get(reliefKey(tx, tz));
-      if (!tile) continue;
-      tile.last = performance.now();
-      ctx.stroke(tile.path);
-    }
-  }
-  ctx.restore();
 }
 
 function drawGrid(range) {

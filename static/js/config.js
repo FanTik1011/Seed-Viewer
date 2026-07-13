@@ -11,7 +11,7 @@ const MAX_TILE_CACHE = 800;
 const MAX_TILE_QUEUE = 180;
 const MAX_TILE_REQUESTS = IS_HEROKU
   ? 5
-  : IS_LOCAL_HOST ? Math.max(3, Math.min(6, Math.floor((navigator.hardwareConcurrency || 4) / 2))) : 6;
+  : IS_LOCAL_HOST ? Math.max(3, Math.min(6, Math.floor((navigator.hardwareConcurrency || 4) / 2))) : 5;
 const MAX_DRAW_TILES = 300;
 const TILE_REQUEST_TIMEOUT = IS_HEROKU ? 24000 : IS_LOCAL_HOST ? 12000 : 18000;
 
