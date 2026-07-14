@@ -140,3 +140,7 @@ let structRegionQueue = [];
 let structRegionInFlight = 0;
 let sidebarRefreshTimer = 0;
 let structureStreamTimer = 0;
+const activePointers = new Map();
+let pinchStartDist = 0;
+let pinchStartZoom = 0;
+let pinchAnchor = null;

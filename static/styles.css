@@ -6822,3 +6822,348 @@
   .favorite-seed-actions {
     gap: 8px !important;
   }
+
+  /* ================================================================
+     TRUE MOBILE LAYOUT (phones, <=700px)
+     Rebuilds the header as a compact touch-friendly control strip and
+     turns the left panel into a bottom sheet. Kept last on purpose so
+     it wins over every earlier responsive pass in this file.
+     ================================================================ */
+  @media (max-width: 700px) {
+    :root {
+      --bottom-h: 56px;
+      --mobile-header-h: 168px;
+      --mobile-sheet-collapsed: 56px;
+      --mobile-sheet-expanded: min(74vh, 620px);
+    }
+
+    html, body, .app { overscroll-behavior: none !important; }
+
+    #map-canvas { touch-action: none !important; }
+
+    .layout::before { display: none !important; }
+
+    /* The old "hide the whole left panel" behavior doesn't apply here —
+       on mobile, sidebar-hidden only collapses the bottom sheet. */
+    body.sidebar-hidden .topbar {
+      opacity: 1 !important;
+      pointer-events: auto !important;
+      transform: none !important;
+    }
+
+    /* ---- Header: fixed, full width, safe-area aware ---- */
+    .topbar {
+      position: fixed !important;
+      left: 0 !important;
+      right: 0 !important;
+      top: 0 !important;
+      width: 100% !important;
+      height: auto !important;
+      display: grid !important;
+      grid-template-columns: repeat(10, minmax(0, 1fr)) !important;
+      grid-template-rows: 44px 40px 40px !important;
+      grid-template-areas:
+        "seed seed seed seed seed seed seed seed seed seed"
+        "version version version version version dimension dimension dimension dimension dimension"
+        "random random like like fav fav copy copy share share" !important;
+      align-items: stretch !important;
+      gap: 7px !important;
+      padding: calc(env(safe-area-inset-top, 0px) + 8px) 10px 9px !important;
+      background: linear-gradient(180deg, rgba(23,22,42,.98), rgba(15,14,28,.97)) !important;
+      border: 0 !important;
+      border-bottom: 1px solid var(--ui-line, rgba(134,129,190,.22)) !important;
+      box-shadow: 0 12px 30px rgba(0,0,0,.42) !important;
+      z-index: 40 !important;
+    }
+
+    .brand { display: none !important; }
+    .seed-form, .top-actions { display: contents !important; }
+
+    #seed-input {
+      grid-area: seed !important;
+      width: 100% !important;
+      height: 44px !important;
+      padding: 0 12px !important;
+      border-radius: 8px !important;
+      font-size: 16px !important; /* prevents iOS auto-zoom on focus */
+    }
+
+    #version-select {
+      grid-area: version !important;
+      width: 100% !important;
+      height: 40px !important;
+      padding: 0 8px !important;
+      border-radius: 8px !important;
+      font-size: 12px !important;
+    }
+
+    #dimension-select {
+      grid-area: dimension !important;
+      display: block !important;
+      width: 100% !important;
+      height: 40px !important;
+      padding: 0 8px !important;
+      border-radius: 8px !important;
+      font-size: 12px !important;
+    }
+
+    #random-btn {
+      grid-area: random !important;
+      display: flex !important;
+      width: 100% !important;
+      height: 40px !important;
+      padding: 0 !important;
+      border-radius: 8px !important;
+      justify-content: center !important;
+    }
+    #random-btn span { display: none !important; }
+
+    #like-seed-btn { grid-area: like !important; }
+    #favorites-btn { grid-area: fav !important; }
+    #copy-seed-btn { grid-area: copy !important; }
+    #share-url-btn { grid-area: share !important; }
+
+    .top-actions .btn {
+      width: 100% !important;
+      height: 40px !important;
+      min-width: 0 !important;
+      padding: 0 !important;
+      border-radius: 8px !important;
+    }
+    .top-actions .btn span { display: none !important; }
+
+    /* ---- Map surface fills the whole viewport behind the overlays ---- */
+    .layout, .map-stage, #map-canvas {
+      position: absolute !important;
+      inset: 0 !important;
+    }
+
+    .empty {
+      padding-top: calc(var(--mobile-header-h) + 12px) !important;
+      padding-bottom: calc(var(--mobile-sheet-collapsed) + 16px) !important;
+    }
+
+    /* ---- Floating HUD bits: clear the fixed header ---- */
+    .seed-card, .compass, .distance-note { display: none !important; }
+
+    .chunk-pill {
+      left: 12px !important;
+      right: auto !important;
+      top: calc(var(--mobile-header-h) + 10px) !important;
+      bottom: auto !important;
+      height: auto !important;
+      width: auto !important;
+      max-width: calc(100vw - 24px) !important;
+      transform: none !important;
+    }
+
+    .toast {
+      left: 50% !important;
+      right: auto !important;
+      top: calc(var(--mobile-header-h) + 10px) !important;
+      transform: translateX(-50%) !important;
+    }
+
+    /* ---- Map + Seed Finder pills, top-right under the header ----
+       The compound ".sidebar.is-collapsed" selector is needed to out-
+       specificity "body.sidebar-hidden .sidebar.is-collapsed .map-panel"
+       (which otherwise wins and re-applies its own top offset). */
+    .map-panel,
+    .sidebar.is-collapsed .map-panel,
+    body.sidebar-hidden .sidebar.is-collapsed .map-panel {
+      position: fixed !important;
+      top: calc(var(--mobile-header-h) + 8px) !important;
+      right: 8px !important;
+      left: auto !important;
+      bottom: auto !important;
+      width: 168px !important;
+    }
+
+    .finder-tab, .finder-tab:hover,
+    body.sidebar-hidden .finder-tab, body.sidebar-hidden .finder-tab:hover {
+      position: fixed !important;
+      top: calc(var(--mobile-header-h) + 100px) !important;
+      right: 8px !important;
+      bottom: auto !important;
+      left: auto !important;
+      width: 168px !important;
+      max-width: calc(100vw - 16px) !important;
+      height: 42px !important;
+      transform: none !important;
+    }
+
+    /* While the Features sheet, Seed Finder, or Favorites drawer is open,
+       these would overlap its top edge — hide until it closes again.
+       The selectors matching ".sidebar.is-collapsed" are needed to out-
+       specificity the always-show-when-collapsed rule further above. */
+    body:not(.sidebar-hidden) .map-panel,
+    body:not(.sidebar-hidden) .finder-tab,
+    body:not(.finder-hidden) .map-panel,
+    body:not(.finder-hidden) .sidebar.is-collapsed .map-panel,
+    body:not(.finder-hidden) .finder-tab,
+    body.favorites-open .map-panel,
+    body.favorites-open .sidebar.is-collapsed .map-panel,
+    body.favorites-open .finder-tab {
+      opacity: 0 !important;
+      pointer-events: none !important;
+    }
+
+    /* ---- Zoom stack: bottom-right, clears the collapsed sheet handle ---- */
+    .zoom-stack {
+      right: 10px !important;
+      bottom: calc(var(--mobile-sheet-collapsed) + 14px) !important;
+    }
+
+    /* ---- Sidebar becomes a bottom sheet ---- */
+    .sidebar, body.sidebar-hidden .sidebar.is-collapsed {
+      position: fixed !important;
+      left: 0 !important;
+      right: 0 !important;
+      bottom: 0 !important;
+      top: auto !important;
+      width: 100% !important;
+      height: var(--mobile-sheet-expanded) !important;
+      max-height: var(--mobile-sheet-expanded) !important;
+      display: flex !important;
+      flex-direction: column !important;
+      padding: 0 !important;
+      border-radius: 16px 16px 0 0 !important;
+      border: 1px solid var(--ui-line, rgba(134,129,190,.24)) !important;
+      border-bottom: 0 !important;
+      background: linear-gradient(180deg, rgba(23,22,42,.98), rgba(15,14,28,.99)) !important;
+      box-shadow: 0 -14px 34px rgba(0,0,0,.5) !important;
+      z-index: 36 !important;
+      overflow: hidden !important;
+      transform: none !important;
+      transition: height .26s cubic-bezier(.2,.8,.2,1) !important;
+      pointer-events: auto !important;
+    }
+
+    .sidebar.is-collapsed, body.sidebar-hidden .sidebar.is-collapsed {
+      height: var(--mobile-sheet-collapsed) !important;
+    }
+
+    /* Drag handle: full-width bar at the top of the sheet.
+       Selectors are repeated at high specificity to beat the
+       body.sidebar-hidden .sidebar.is-collapsed .menu-toggle rules above. */
+    .sidebar .menu-toggle,
+    .sidebar.is-collapsed .menu-toggle,
+    body.sidebar-hidden .sidebar.is-collapsed .menu-toggle,
+    body:not(.sidebar-hidden) .sidebar .menu-toggle {
+      position: relative !important;
+      order: -1 !important;
+      left: auto !important;
+      right: auto !important;
+      top: auto !important;
+      bottom: auto !important;
+      width: 100% !important;
+      height: 44px !important;
+      flex: 0 0 44px !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      gap: 8px !important;
+      border-radius: 0 !important;
+      border: 0 !important;
+      border-bottom: 1px solid var(--ui-line, rgba(134,129,190,.18)) !important;
+      background: transparent !important;
+      box-shadow: none !important;
+      transform: none !important;
+      opacity: 1 !important;
+      pointer-events: auto !important;
+      animation: none !important;
+    }
+
+    .sidebar .menu-toggle::before {
+      content: "Features";
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+      color: var(--ui-text, #f1f2ff);
+    }
+
+    .sidebar .menu-toggle span,
+    body.sidebar-hidden .sidebar.is-collapsed .menu-toggle span {
+      position: static !important;
+      width: 8px !important;
+      height: 8px !important;
+      border-right-width: 2px !important;
+      border-bottom-width: 2px !important;
+      transform: rotate(45deg) !important;
+    }
+
+    .sidebar.is-collapsed .menu-toggle span,
+    body.sidebar-hidden .sidebar.is-collapsed .menu-toggle span {
+      transform: rotate(-135deg) !important;
+    }
+
+    .sidebar > .features-panel {
+      position: relative !important;
+      inset: auto !important;
+      flex: 1 1 auto !important;
+      min-height: 0 !important;
+      width: 100% !important;
+      display: flex !important;
+      flex-direction: column !important;
+      overflow: hidden !important;
+      padding: 0 !important;
+    }
+
+    .features-panel .section-title {
+      flex: 0 0 auto !important;
+      height: 40px !important;
+      padding: 0 14px !important;
+      border-top: 0 !important;
+    }
+
+    .features-panel .feature-scroll {
+      flex: 1 1 auto !important;
+      min-height: 0 !important;
+      padding: 0 12px 12px !important;
+    }
+
+    .features-panel .struct-list,
+    .features-panel .biome-list {
+      grid-template-columns: 1fr !important;
+      max-height: none !important;
+    }
+
+    .features-panel .layer-row {
+      width: 100% !important;
+      min-height: 44px !important;
+      grid-template-columns: 30px minmax(0, 1fr) auto !important;
+      font-size: 13px !important;
+    }
+
+    .features-panel .layer-label {
+      overflow: visible !important;
+      text-overflow: clip !important;
+      white-space: normal !important;
+    }
+
+    .sidebar > .go-panel {
+      position: relative !important;
+      flex: 0 0 auto !important;
+      left: auto !important;
+      right: auto !important;
+      bottom: auto !important;
+      width: 100% !important;
+      max-width: none !important;
+      padding: 10px 14px calc(env(safe-area-inset-bottom, 0px) + 12px) !important;
+      border-top: 1px solid var(--ui-line, rgba(134,129,190,.18)) !important;
+      background: rgba(12,11,22,.5) !important;
+    }
+
+    .sidebar .go-grid .number,
+    .sidebar .go-grid .btn {
+      height: 42px !important;
+      border-radius: 8px !important;
+      font-size: 13px !important;
+    }
+
+    /* Seed Finder / Favorites sheets should not collide with the map controls */
+    .finder-drawer, .favorites-drawer {
+      top: calc(var(--mobile-header-h) + 4px) !important;
+    }
+  }

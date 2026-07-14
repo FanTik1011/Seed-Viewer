@@ -457,10 +457,59 @@ function handlePointerMove(event) {
   }
 }
 
+function startPinch() {
+  cancelMomentum();
+  cancelZoomAnim();
+  freezeMarkers();
+  beginZoomTilePause();
+  dragStart = null;
+  panSample = null;
+  canvas.classList.remove("dragging");
+  const pts = Array.from(activePointers.values());
+  const rect = canvas.getBoundingClientRect();
+  pinchStartDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1;
+  pinchStartZoom = state.zoom;
+  pinchAnchor = screenToWorld(
+    (pts[0].x + pts[1].x) / 2 - rect.left,
+    (pts[0].y + pts[1].y) / 2 - rect.top
+  );
+}
+
+function updatePinch() {
+  const pts = Array.from(activePointers.values());
+  if (pts.length < 2 || !pinchAnchor) return;
+  const rect = canvas.getBoundingClientRect();
+  const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1;
+  const sx = (pts[0].x + pts[1].x) / 2 - rect.left;
+  const sy = (pts[0].y + pts[1].y) / 2 - rect.top;
+  state.zoom = clampMapZoom(pinchStartZoom * (pinchStartDist / dist));
+  state.zoomTarget = state.zoom;
+  state.viewX = pinchAnchor.x - (sx - state.width / 2) * state.zoom;
+  state.viewZ = pinchAnchor.z - (sy - state.height / 2) * state.zoom;
+  scheduleUrlUpdate();
+  requestRender();
+}
+
+function endPinch() {
+  pinchAnchor = null;
+  unfreezeMarkers();
+  scheduleZoomTileLoad();
+  loadVisibleStructuresNow();
+}
+
 function bindEvents() {
   window.addEventListener("resize", resizeCanvas);
   canvas.addEventListener("pointerdown", event => {
     if (!state.loaded) return;
+    const isFirst = activePointers.size === 0;
+    activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    try { canvas.setPointerCapture(event.pointerId); } catch { /* pointer already gone */ }
+    els.tooltip.classList.remove("visible");
+    if (activePointers.size === 2) {
+      startPinch();
+      return;
+    }
+    if (activePointers.size > 2 || !isFirst) return;
     cancelMomentum();
     cancelZoomAnim();
     freezeMarkers();
@@ -469,11 +518,17 @@ function bindEvents() {
     pointerMoved = false;
     panSample = { x: state.viewX, z: state.viewZ, t: performance.now() };
     panVel = { x: 0, z: 0 };
-    canvas.setPointerCapture(event.pointerId);
     canvas.classList.add("dragging");
-    els.tooltip.classList.remove("visible");
   });
   canvas.addEventListener("pointerup", event => {
+    const wasPinching = activePointers.size >= 2;
+    activePointers.delete(event.pointerId);
+    try { canvas.releasePointerCapture(event.pointerId); } catch { /* already released */ }
+    if (wasPinching) {
+      canvas.classList.remove("dragging");
+      if (activePointers.size < 2) endPinch();
+      return;
+    }
     if (!pointerMoved) selectLocationAt(event);
     if (pointerMoved) {
       scheduleUrlUpdate();
@@ -488,20 +543,33 @@ function bindEvents() {
     }
     dragStart = null;
     panSample = null;
-    canvas.releasePointerCapture(event.pointerId);
     canvas.classList.remove("dragging");
   });
   canvas.addEventListener("pointerleave", () => {
     if (!dragStart) els.tooltip.classList.remove("visible");
   });
-  canvas.addEventListener("pointercancel", () => {
+  canvas.addEventListener("pointercancel", event => {
+    const wasPinching = activePointers.size >= 2;
+    activePointers.delete(event.pointerId);
     dragStart = null;
     panSample = null;
     canvas.classList.remove("dragging");
-    unfreezeMarkers();
-    loadVisibleStructuresNow();
+    if (wasPinching && activePointers.size < 2) endPinch();
+    else if (!wasPinching) {
+      unfreezeMarkers();
+      loadVisibleStructuresNow();
+    }
   });
-  canvas.addEventListener("pointermove", handlePointerMove);
+  canvas.addEventListener("pointermove", event => {
+    if (activePointers.has(event.pointerId)) {
+      activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    }
+    if (activePointers.size >= 2) {
+      updatePinch();
+      return;
+    }
+    handlePointerMove(event);
+  });
   canvas.addEventListener("dblclick", () => {
     selectLocation({ label:"Map point", icon:"target", color:"#edf3ee", ...state.cursor });
     copyCoords(state.selected);
