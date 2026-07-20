@@ -9,6 +9,8 @@ services:
     environment:
       PORT: "8080"
       PUBLIC_BASE_PATH: "/minecraft-tools/Seed-Viewer"
+      SEED_API_MODE: "seed-vault"
+      SEED_MOCK_API_ENABLED: "1"
       WEB_CONCURRENCY: "1"
       GUNICORN_THREADS: "4"
       GUNICORN_TIMEOUT: "120"

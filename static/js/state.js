@@ -64,7 +64,27 @@ const els = {
   favoritesList: document.getElementById("favorites-list"),
   favoritesEmpty: document.getElementById("favorites-empty"),
   favoritesClose: document.getElementById("close-favorites"),
-  favoritesHeadIcon: document.getElementById("favorites-head-icon")
+  favoritesHeadIcon: document.getElementById("favorites-head-icon"),
+  publicSeedsPanel: document.getElementById("public-seeds-panel"),
+  publicSeedsList: document.getElementById("public-seeds-list"),
+  publicSeedsEmpty: document.getElementById("public-seeds-empty"),
+  publicSeedsCount: document.getElementById("public-seeds-count"),
+  refreshPublicSeeds: document.getElementById("refresh-public-seeds"),
+  seedAuthModal: document.getElementById("seed-auth-modal"),
+  seedAuthBackdrop: document.getElementById("seed-auth-backdrop"),
+  seedAuthForm: document.getElementById("seed-auth-form"),
+  seedAuthTitle: document.getElementById("seed-auth-title"),
+  seedAuthClose: document.getElementById("seed-auth-close"),
+  seedAuthLoginTab: document.getElementById("seed-auth-login-tab"),
+  seedAuthRegisterTab: document.getElementById("seed-auth-register-tab"),
+  seedAuthNameRow: document.querySelector(".seed-auth-name-row"),
+  seedAuthConfirmRow: document.querySelector(".seed-auth-confirm-row"),
+  seedAuthName: document.getElementById("seed-auth-name"),
+  seedAuthEmail: document.getElementById("seed-auth-email"),
+  seedAuthPassword: document.getElementById("seed-auth-password"),
+  seedAuthPasswordConfirm: document.getElementById("seed-auth-password-confirm"),
+  seedAuthError: document.getElementById("seed-auth-error"),
+  seedAuthSubmit: document.getElementById("seed-auth-submit")
 };
 
 const state = {
@@ -98,6 +118,8 @@ const state = {
   finderResults: [],
   finderBusy: false,
   favoriteSeeds: [],
+  publicSeeds: [],
+  publicSeedsBusy: false,
   cursor: { x: 0, z: 0 },
   selected: null,
   capabilities: null,

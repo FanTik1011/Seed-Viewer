@@ -40,7 +40,62 @@ async function copyText(text, message = "Copied") {
 }
 
 const FAVORITE_SEEDS_STORAGE_KEY = "seedmap.favoriteSeeds.v1";
+const PENDING_LIKED_SEED_STORAGE_KEY = "seedmap.pendingLikedSeed.v1";
+const PUBLIC_SEED_LIKES_STORAGE_KEY = "seedmap.publicSeedLikes.v1";
+const LOCAL_SEED_USER_STORAGE_KEY = "seedmap.localUserId.v1";
+const SEED_VAULT_TOKEN_STORAGE_KEY = "seedVaultToken";
+const LEGACY_SEED_VAULT_TOKEN_STORAGE_KEY = "seedmap.seedVaultToken.v1";
 const FAVORITE_SEEDS_LIMIT = 80;
+const PUBLIC_SEEDS_LIMIT = 12;
+const SEED_API_BASE = String(window.SEED_VIEWER_SEED_API_BASE || API || "").replace(/\/$/, "");
+const SEED_API_MODE = String(window.SEED_VIEWER_SEED_API_MODE || "").toLowerCase();
+const SEED_AUTH_URL = String(window.SEED_VIEWER_AUTH_URL || "").trim();
+const SEED_AUTH_COMPLETE_PARAM = "seedAuthComplete";
+const SEED_VAULT_ENABLED = SEED_API_MODE === "seed-vault" || /(?:panel\.godlike|seed-vault|\/api\/v2)/i.test(SEED_API_BASE);
+let seedAuthMode = "login";
+let pendingSeedVaultAuth = null;
+let frameHeightRaf = 0;
+let frameResizeObserver = null;
+
+function appFrameHeight() {
+  const doc = document.documentElement;
+  const body = document.body;
+  const panelBottom = els.publicSeedsPanel
+    ? Math.ceil(els.publicSeedsPanel.getBoundingClientRect().bottom + window.scrollY)
+    : 0;
+  return Math.ceil(Math.max(
+    doc?.scrollHeight || 0,
+    body?.scrollHeight || 0,
+    doc?.offsetHeight || 0,
+    body?.offsetHeight || 0,
+    panelBottom
+  ));
+}
+
+function postFrameHeight() {
+  frameHeightRaf = 0;
+  if (window.parent === window) return;
+  window.parent.postMessage({
+    type: "seed-viewer:height",
+    height: appFrameHeight()
+  }, "*");
+}
+
+function queueFrameHeightPost() {
+  if (frameHeightRaf) cancelAnimationFrame(frameHeightRaf);
+  frameHeightRaf = requestAnimationFrame(postFrameHeight);
+}
+
+function initFrameResizeBridge() {
+  queueFrameHeightPost();
+  window.addEventListener("load", queueFrameHeightPost);
+  window.addEventListener("resize", queueFrameHeightPost);
+  if ("ResizeObserver" in window) {
+    frameResizeObserver = new ResizeObserver(queueFrameHeightPost);
+    frameResizeObserver.observe(document.body);
+    if (els.publicSeedsPanel) frameResizeObserver.observe(els.publicSeedsPanel);
+  }
+}
 
 function normalizeFavoriteSeed(seed) {
   return String(seed || "").trim();
@@ -62,6 +117,14 @@ function selectedOptionText(select) {
 
 function dimensionText(value) {
   return value === "nether" ? "Nether" : value === "end" ? "The End" : "Overworld";
+}
+
+function appDimension(value) {
+  return value === "the_end" ? "end" : value || "overworld";
+}
+
+function apiDimension(value) {
+  return value === "end" ? "the_end" : value || "overworld";
 }
 
 function compactDate(value) {
@@ -86,13 +149,74 @@ function escapeHtml(value) {
   })[char]);
 }
 
+function localSeedUserId() {
+  try {
+    let id = localStorage.getItem(LOCAL_SEED_USER_STORAGE_KEY);
+    if (!id) {
+      id = `local-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
+      localStorage.setItem(LOCAL_SEED_USER_STORAGE_KEY, id);
+    }
+    return id;
+  } catch {
+    return "local-user";
+  }
+}
+
+function currentSeedUser() {
+  const user = window.SEED_VIEWER_USER || window.GODLIKE_USER || null;
+  const id = String(user?.id || user?.userId || localSeedUserId());
+  return {
+    id,
+    name: String(user?.name || user?.username || user?.displayName || "You"),
+    avatar: String(user?.avatar || user?.avatarUrl || "")
+  };
+}
+
+function seedVaultToken() {
+  const token = window.SEED_VIEWER_SEED_VAULT_TOKEN || window.SEED_VAULT_TOKEN || "";
+  if (token) return String(token);
+  try {
+    return localStorage.getItem(SEED_VAULT_TOKEN_STORAGE_KEY)
+      || localStorage.getItem(LEGACY_SEED_VAULT_TOKEN_STORAGE_KEY)
+      || "";
+  } catch {
+    return "";
+  }
+}
+
+function writeSeedVaultToken(token) {
+  const value = String(token || "").trim();
+  if (!value) return false;
+  try {
+    localStorage.setItem(SEED_VAULT_TOKEN_STORAGE_KEY, value);
+  } catch {
+    return false;
+  }
+  return true;
+}
+
 function sanitizeFavorite(item) {
   const seed = normalizeFavoriteSeed(item?.seed);
   if (!seed) return null;
   const version = String(item.version || "1.20");
-  const dimension = String(item.dimension || "overworld");
+  const dimension = appDimension(String(item.dimension || "overworld"));
+  const likedByMe = Boolean(item.likedByMe ?? item.liked_by_me ?? false);
+  const likedBy = Array.isArray(item.likedBy)
+    ? [...new Set(item.likedBy.map(id => String(id)).filter(Boolean))].slice(0, 500)
+    : likedByMe ? [currentSeedUser().id] : [];
+  const rawLikes = Number.isFinite(Number(item.likes_count))
+    ? Number(item.likes_count)
+    : Number.isFinite(Number(item.likes)) ? Number(item.likes) : 1;
+  const user = item.user && typeof item.user === "object" ? {
+    id: String(item.user.id || ""),
+    name: String(item.user.name || "Player").slice(0, 48),
+    avatar: String(item.user.avatar || "")
+  } : null;
+  const nearbySource = Array.isArray(item.nearby_locations) ? item.nearby_locations : item.nearby;
   return {
+    id: String(item.id || item.apiId || ""),
     key: favoriteKey(seed, version, dimension),
+    title: String(item.title || `Seed ${seed}`).slice(0, 255),
     seed,
     version,
     versionLabel: item.versionLabel || version,
@@ -101,10 +225,390 @@ function sanitizeFavorite(item) {
     centerX: Number.isFinite(Number(item.centerX)) ? Math.round(Number(item.centerX)) : 0,
     centerZ: Number.isFinite(Number(item.centerZ)) ? Math.round(Number(item.centerZ)) : 0,
     zoom: Number.isFinite(Number(item.zoom)) ? Number(item.zoom) : DEFAULT_ZOOM,
-    savedAt: item.savedAt || new Date().toISOString(),
-    lastLoadedAt: item.lastLoadedAt || "",
-    loadCount: Math.max(0, Number(item.loadCount) || 0)
+    savedAt: item.savedAt || item.created_at || new Date().toISOString(),
+    lastLoadedAt: item.lastLoadedAt || item.updated_at || "",
+    loadCount: Math.max(0, Number(item.loadCount) || 0),
+    likes: Math.max(likedBy.length, rawLikes),
+    likedByMe,
+    likedBy,
+    user,
+    nearby: Array.isArray(nearbySource) ? nearbySource.slice(0, 4).map(location => ({
+      label: String(location.label || "Location").slice(0, 48),
+      x: Number.isFinite(Number(location.x)) ? Math.round(Number(location.x)) : 0,
+      z: Number.isFinite(Number(location.z)) ? Math.round(Number(location.z)) : 0,
+      distance: Math.max(0, Math.round(Number(location.distance) || 0))
+    })) : []
   };
+}
+
+function seedApiUrl(path) {
+  return `${SEED_API_BASE}${path}`;
+}
+
+function seedApiIsCrossOrigin() {
+  try {
+    return new URL(SEED_API_BASE || window.location.origin, window.location.origin).origin !== window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
+function seedVaultPath(path) {
+  const base = SEED_API_BASE.toLowerCase();
+  if (base.endsWith("/api/v2/seed-vault")) return path.replace(/^\/api\/v2\/seed-vault/, "");
+  if (base.endsWith("/api/v2")) return path.replace(/^\/api\/v2/, "");
+  return path;
+}
+
+async function seedApiRequest(path, options = {}) {
+  const token = seedVaultToken();
+  const response = await fetch(seedApiUrl(path), {
+    credentials: seedApiIsCrossOrigin() ? "omit" : "same-origin",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(options.headers || {})
+    },
+    ...options
+  });
+  let data = null;
+  try {
+    data = await response.json();
+  } catch {
+    data = null;
+  }
+  if (!response.ok) {
+    const error = new Error(data?.message || `Seed API ${response.status}`);
+    error.status = response.status;
+    error.data = data;
+    throw error;
+  }
+  return data;
+}
+
+function seedApiResponseItem(data) {
+  return data?.data || data?.seed || data;
+}
+
+function seedApiResponseList(data) {
+  return Array.isArray(data?.data) ? data.data : Array.isArray(data?.seeds) ? data.seeds : Array.isArray(data) ? data : [];
+}
+
+function seedVaultPayload(item) {
+  return {
+    title: item.title || `Seed ${item.seed}`,
+    seed: item.seed,
+    version: item.version || "1.20",
+    dimension: apiDimension(item.dimension),
+    centerX: Math.round(Number(item.centerX) || 0),
+    centerZ: Math.round(Number(item.centerZ) || 0),
+    nearby_locations: Array.isArray(item.nearby) ? item.nearby.slice(0, 4).map(location => ({
+      label: location.label || "Location",
+      x: Math.round(Number(location.x) || 0),
+      z: Math.round(Number(location.z) || 0),
+      distance: Math.max(0, Math.round(Number(location.distance) || 0))
+    })) : []
+  };
+}
+
+function setSeedAuthMode(mode) {
+  seedAuthMode = mode === "register" ? "register" : "login";
+  const registering = seedAuthMode === "register";
+  els.seedAuthTitle && (els.seedAuthTitle.textContent = registering ? "Create account" : "Log in");
+  els.seedAuthLoginTab?.classList.toggle("is-active", !registering);
+  els.seedAuthRegisterTab?.classList.toggle("is-active", registering);
+  els.seedAuthNameRow?.classList.toggle("is-hidden", !registering);
+  els.seedAuthConfirmRow?.classList.toggle("is-hidden", !registering);
+  if (els.seedAuthSubmit) els.seedAuthSubmit.textContent = registering ? "Create account" : "Log in";
+  if (els.seedAuthName) els.seedAuthName.required = registering;
+  if (els.seedAuthPasswordConfirm) els.seedAuthPasswordConfirm.required = registering;
+  if (els.seedAuthPassword) els.seedAuthPassword.autocomplete = registering ? "new-password" : "current-password";
+  if (els.seedAuthError) els.seedAuthError.textContent = "";
+}
+
+function setSeedAuthVisible(visible, mode = seedAuthMode, pending = null) {
+  if (!els.seedAuthModal) return false;
+  if (visible) {
+    pendingSeedVaultAuth = pending || pendingSeedVaultAuth;
+    setSeedAuthMode(mode);
+    els.seedAuthModal.classList.remove("is-hidden");
+    els.seedAuthModal.setAttribute("aria-hidden", "false");
+    setTimeout(() => els.seedAuthEmail?.focus(), 0);
+  } else {
+    els.seedAuthModal.classList.add("is-hidden");
+    els.seedAuthModal.setAttribute("aria-hidden", "true");
+    if (els.seedAuthError) els.seedAuthError.textContent = "";
+  }
+  queueFrameHeightPost();
+  return true;
+}
+
+function requestSeedVaultAuth(item, action = "save") {
+  if (setSeedAuthVisible(true, "login", { item, action })) return;
+  if (SEED_AUTH_URL) startSeedAuthFlow(item);
+  else showToast("Login required to save seeds");
+}
+
+function requireSeedVaultAuth(item, action = "save") {
+  if (!SEED_VAULT_ENABLED || seedVaultToken()) return true;
+  requestSeedVaultAuth(item, action);
+  return false;
+}
+
+function seedAuthMessage(error) {
+  const data = error?.data || {};
+  if (data.errors && typeof data.errors === "object") {
+    const first = Object.values(data.errors).flat().find(Boolean);
+    if (first) return String(first);
+  }
+  return data.message || error?.message || "Auth failed";
+}
+
+async function submitSeedAuth(event) {
+  event?.preventDefault();
+  if (!els.seedAuthForm || !SEED_VAULT_ENABLED) return;
+  const email = els.seedAuthEmail?.value.trim() || "";
+  const password = els.seedAuthPassword?.value || "";
+  const name = els.seedAuthName?.value.trim() || "";
+  const passwordConfirmation = els.seedAuthPasswordConfirm?.value || "";
+  const registering = seedAuthMode === "register";
+  if (els.seedAuthError) els.seedAuthError.textContent = "";
+  if (registering && password !== passwordConfirmation) {
+    if (els.seedAuthError) els.seedAuthError.textContent = "Passwords do not match";
+    return;
+  }
+
+  const payload = registering
+    ? { email, name, password, password_confirmation: passwordConfirmation }
+    : { email, password };
+  const path = seedVaultPath(`/api/v2/seed-vault/auth/${registering ? "register" : "login"}`);
+  els.seedAuthSubmit?.setAttribute("disabled", "true");
+  try {
+    const data = await seedApiRequest(path, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    const token = data?.data?.token || data?.token || "";
+    if (!writeSeedVaultToken(token)) throw new Error("Token was not returned");
+    const pending = pendingSeedVaultAuth;
+    pendingSeedVaultAuth = null;
+    setSeedAuthVisible(false);
+    showToast(registering ? "Account created" : "Logged in");
+    await loadPublicSeedCards();
+    if (pending?.item) {
+      if (pending.action === "like") await togglePublicSeedLike(pending.item);
+      else await addFavoriteSeed(pending.item, { skipAuth: true });
+    }
+  } catch (err) {
+    console.warn("SeedVault auth failed", err);
+    if (els.seedAuthError) els.seedAuthError.textContent = seedAuthMessage(err);
+  } finally {
+    els.seedAuthSubmit?.removeAttribute("disabled");
+  }
+}
+
+function authReturnUrl() {
+  const url = new URL(window.location.href);
+  url.searchParams.set(SEED_AUTH_COMPLETE_PARAM, "1");
+  return url.toString();
+}
+
+function seedAuthWasCompleted() {
+  return new URLSearchParams(window.location.search).get(SEED_AUTH_COMPLETE_PARAM) === "1";
+}
+
+function clearSeedAuthReturnParam() {
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has(SEED_AUTH_COMPLETE_PARAM)) return;
+  url.searchParams.delete(SEED_AUTH_COMPLETE_PARAM);
+  window.history.replaceState(null, "", url.toString());
+}
+
+function buildSeedAuthUrl(item) {
+  const target = new URL(SEED_AUTH_URL, window.location.origin);
+  target.searchParams.set("seedId", item.seed);
+  target.searchParams.set("version", item.version);
+  target.searchParams.set("dimension", item.dimension);
+  target.searchParams.set("redirect", authReturnUrl());
+  return target.toString();
+}
+
+function startSeedAuthFlow(item) {
+  try {
+    sessionStorage.setItem(PENDING_LIKED_SEED_STORAGE_KEY, JSON.stringify(item));
+  } catch {
+    // Auth can still continue; the seed is also present in query params.
+  }
+  showToast("Opening registration");
+  window.location.href = buildSeedAuthUrl(item);
+}
+
+function upsertFavoriteSeed(item) {
+  const clean = sanitizeFavorite(item);
+  if (!clean) return null;
+  const index = favoriteSeedIndex(clean.key);
+  if (index >= 0) {
+    state.favoriteSeeds[index] = {
+      ...state.favoriteSeeds[index],
+      ...clean,
+      savedAt: state.favoriteSeeds[index].savedAt || clean.savedAt,
+      likes: Number.isFinite(Number(clean.likes)) ? Number(clean.likes) : state.favoriteSeeds[index].likes
+    };
+  } else {
+    state.favoriteSeeds.unshift(clean);
+    state.favoriteSeeds = state.favoriteSeeds.slice(0, FAVORITE_SEEDS_LIMIT);
+  }
+  return clean;
+}
+
+function sameSeedItem(a, b) {
+  if (!a || !b) return false;
+  return Boolean(a.id && b.id && a.id === b.id) || a.key === b.key;
+}
+
+async function saveFavoriteSeedToApi(item) {
+  if (SEED_VAULT_ENABLED) {
+    if (!requireSeedVaultAuth(item)) return null;
+    const created = await seedApiRequest(seedVaultPath("/api/v2/seed-vault/seeds"), {
+      method: "POST",
+      body: JSON.stringify(seedVaultPayload(item))
+    });
+    let clean = sanitizeFavorite(seedApiResponseItem(created));
+    if (clean && (Number(item.likes) || 0) > 0) {
+      const liked = await seedApiRequest(seedVaultPath(`/api/v2/seed-vault/seeds/${encodeURIComponent(clean.id)}/like`), {
+        method: "POST"
+      });
+      clean = sanitizeFavorite(seedApiResponseItem(liked)) || clean;
+    }
+    return clean;
+  }
+  const data = await seedApiRequest("/api/seeds/save", {
+    method: "POST",
+    body: JSON.stringify(item)
+  });
+  return sanitizeFavorite(seedApiResponseItem(data));
+}
+
+function readPublicSeedLikes() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(PUBLIC_SEED_LIKES_STORAGE_KEY) || "[]");
+    return new Set(Array.isArray(raw) ? raw : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function writePublicSeedLikes(keys) {
+  try {
+    localStorage.setItem(PUBLIC_SEED_LIKES_STORAGE_KEY, JSON.stringify([...keys]));
+  } catch {
+    // Non-critical; this only prevents duplicate local likes in one browser.
+  }
+}
+
+function publicSeedIsLiked(item) {
+  if (item.likedByMe) return true;
+  const user = currentSeedUser();
+  const liked = readPublicSeedLikes();
+  return liked.has(item.key) || (Array.isArray(item.likedBy) && item.likedBy.map(String).includes(user.id));
+}
+
+function currentNearbyLocations(limit = 3) {
+  if (!state.loaded || typeof buildMarkers !== "function") return [];
+  const originX = Number.isFinite(state.viewX) ? state.viewX : 0;
+  const originZ = Number.isFinite(state.viewZ) ? state.viewZ : 0;
+  const seen = new Set();
+  return buildMarkers()
+    .filter(marker => marker && marker.type !== "spawn" && Number.isFinite(marker.x) && Number.isFinite(marker.z))
+    .map(marker => ({
+      label: marker.label || marker.type || "Location",
+      x: Math.round(marker.x),
+      z: Math.round(marker.z),
+      distance: Math.round(Math.hypot(marker.x - originX, marker.z - originZ))
+    }))
+    .filter(location => {
+      const key = `${location.label}|${location.x}|${location.z}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, limit);
+}
+
+async function togglePublicSeedLike(item) {
+  const clean = sanitizeFavorite(item);
+  if (!clean) return;
+  if (SEED_VAULT_ENABLED) {
+    if (!requireSeedVaultAuth(clean, "like")) return;
+    const wasLiked = publicSeedIsLiked(clean);
+    try {
+      let target = clean;
+      if (!target.id) {
+        const created = await seedApiRequest(seedVaultPath("/api/v2/seed-vault/seeds"), {
+          method: "POST",
+          body: JSON.stringify(seedVaultPayload(target))
+        });
+        target = sanitizeFavorite(seedApiResponseItem(created)) || target;
+      }
+      const data = await seedApiRequest(seedVaultPath(`/api/v2/seed-vault/seeds/${encodeURIComponent(target.id)}/like`), {
+        method: wasLiked ? "DELETE" : "POST"
+      });
+      const apiItem = sanitizeFavorite(seedApiResponseItem(data));
+      if (apiItem) {
+        upsertFavoriteSeed(apiItem);
+        const index = state.publicSeeds.findIndex(seed => sameSeedItem(seed, apiItem));
+        if (index >= 0) state.publicSeeds[index] = apiItem;
+        else state.publicSeeds.unshift(apiItem);
+        writeFavoriteSeeds();
+        renderFavoriteSeeds();
+        renderPublicSeedCards();
+        updateFavoriteButtons();
+      }
+      showToast(wasLiked ? "Seed unliked" : "Seed liked");
+      await loadPublicSeedCards();
+    } catch (err) {
+      console.warn("SeedVault like failed", err);
+      showToast("Seed like failed");
+    }
+    return;
+  }
+  const user = currentSeedUser();
+  const liked = readPublicSeedLikes();
+  const wasLiked = publicSeedIsLiked(clean);
+  if (wasLiked) liked.delete(clean.key);
+  else liked.add(clean.key);
+  writePublicSeedLikes(liked);
+  const likedBy = new Set((clean.likedBy || []).map(String));
+  if (wasLiked) likedBy.delete(user.id);
+  else likedBy.add(user.id);
+  clean.likedBy = [...likedBy];
+  clean.likes = Math.max(0, clean.likedBy.length || (Number(clean.likes) || 1) + (wasLiked ? -1 : 1));
+  if (!clean.user) clean.user = user;
+  upsertFavoriteSeed(clean);
+  state.publicSeeds = state.publicSeeds.map(seed => sameSeedItem(seed, clean) ? { ...seed, likes: clean.likes } : seed);
+  writeFavoriteSeeds();
+  renderFavoriteSeeds();
+  renderPublicSeedCards();
+  updateFavoriteButtons();
+  showToast(wasLiked ? "Seed unliked" : "Seed liked");
+  try {
+    const data = await seedApiRequest(wasLiked ? "/api/seeds/unlike" : "/api/seeds/like", {
+      method: "POST",
+      body: JSON.stringify({ ...clean, user })
+    });
+    const apiItem = sanitizeFavorite(data.seed || data);
+    if (apiItem) {
+      upsertFavoriteSeed(apiItem);
+      state.publicSeeds = state.publicSeeds.map(seed => sameSeedItem(seed, apiItem) ? apiItem : seed);
+      writeFavoriteSeeds();
+      renderFavoriteSeeds();
+      renderPublicSeedCards();
+      updateFavoriteButtons();
+    }
+  } catch (err) {
+    console.warn("Seed like API unavailable; using local like", err);
+  }
 }
 
 function readFavoriteSeeds() {
@@ -154,6 +658,7 @@ function currentFavoritePayload() {
   const dimension = els.dimension.value || "overworld";
   const matchesLoadedWorld = state.loaded && state.seed === seed && state.version === version && state.dimension === dimension;
   const now = new Date().toISOString();
+  const user = currentSeedUser();
   return sanitizeFavorite({
     seed,
     version,
@@ -165,11 +670,48 @@ function currentFavoritePayload() {
     zoom: matchesLoadedWorld ? state.zoom : DEFAULT_ZOOM,
     savedAt: now,
     lastLoadedAt: matchesLoadedWorld ? now : "",
-    loadCount: matchesLoadedWorld ? 1 : 0
+    loadCount: matchesLoadedWorld ? 1 : 0,
+    likes: 1,
+    likedBy: [user.id],
+    user,
+    nearby: matchesLoadedWorld ? currentNearbyLocations(3) : []
   });
 }
 
-function toggleCurrentFavorite() {
+async function addFavoriteSeed(item, options = {}) {
+  if (!item) {
+    showToast("Enter a seed first");
+    return;
+  }
+  if (SEED_VAULT_ENABLED && !options.skipAuth && !seedVaultToken()) {
+    requireSeedVaultAuth(item, "save");
+    return;
+  }
+  if (!SEED_VAULT_ENABLED && !options.skipAuth && SEED_AUTH_URL && !seedAuthWasCompleted()) {
+    startSeedAuthFlow(item);
+    return;
+  }
+
+  const saved = upsertFavoriteSeed(item);
+  writeFavoriteSeeds();
+  renderFavoriteSeeds();
+  renderPublicSeedCards();
+  updateFavoriteButtons();
+  showToast(options.fromAuth ? "Seed saved after registration" : "Seed saved");
+
+  try {
+    const apiItem = await saveFavoriteSeedToApi(saved);
+    if (apiItem) upsertFavoriteSeed(apiItem);
+    writeFavoriteSeeds();
+    renderFavoriteSeeds();
+    updateFavoriteButtons();
+    await loadPublicSeedCards();
+  } catch (err) {
+    console.warn("Seed API save unavailable; using local favorites", err);
+  }
+}
+
+async function toggleCurrentFavorite() {
   const item = currentFavoritePayload();
   if (!item) {
     showToast("Enter a seed first");
@@ -179,14 +721,13 @@ function toggleCurrentFavorite() {
   if (index >= 0) {
     state.favoriteSeeds.splice(index, 1);
     showToast("Removed from favorites");
+    writeFavoriteSeeds();
+    renderFavoriteSeeds();
+    renderPublicSeedCards();
+    updateFavoriteButtons();
   } else {
-    state.favoriteSeeds.unshift(item);
-    state.favoriteSeeds = state.favoriteSeeds.slice(0, FAVORITE_SEEDS_LIMIT);
-    showToast("Seed liked");
+    await addFavoriteSeed(item);
   }
-  writeFavoriteSeeds();
-  renderFavoriteSeeds();
-  updateFavoriteButtons();
 }
 
 function setFavoritesVisible(visible) {
@@ -275,10 +816,133 @@ function renderFavoriteSeeds() {
   }
 }
 
+function publicSeedSource() {
+  if (state.publicSeeds.length) return state.publicSeeds.slice(0, PUBLIC_SEEDS_LIMIT);
+  return state.favoriteSeeds.slice(0, PUBLIC_SEEDS_LIMIT).map(item => ({ ...item, localOnly: true }));
+}
+
+function publicSeedLikesText(item) {
+  const likes = Math.max(0, Number(item.likes) || 0);
+  return `${likes} ${likes === 1 ? "like" : "likes"}`;
+}
+
+function distanceText(distance) {
+  const blocks = Math.max(0, Math.round(Number(distance) || 0));
+  return `${blocks} ${blocks === 1 ? "block" : "blocks"}`;
+}
+
+function isTopSeed(item, items) {
+  const maxLikes = Math.max(0, ...items.map(seed => Number(seed.likes) || 0));
+  return maxLikes > 1 && (Number(item.likes) || 0) === maxLikes;
+}
+
+function buildSeedCardShareUrl(item) {
+  const url = new URL(window.location.href);
+  url.search = "";
+  url.hash = "";
+  url.searchParams.set("seed", item.seed);
+  url.searchParams.set("version", item.version);
+  url.searchParams.set("dimension", item.dimension || "overworld");
+  url.searchParams.set("x", String(Math.round(Number(item.centerX) || 0)));
+  url.searchParams.set("z", String(Math.round(Number(item.centerZ) || 0)));
+  url.searchParams.set("zoom", (4 / (Number(item.zoom) || DEFAULT_ZOOM)).toFixed(3).replace(/0+$/, "").replace(/\.$/, ""));
+  url.searchParams.set("load", "1");
+  return url.toString();
+}
+
+function renderPublicSeedCards() {
+  if (!els.publicSeedsList || !els.publicSeedsEmpty) return;
+  const items = publicSeedSource();
+  els.publicSeedsList.innerHTML = "";
+  els.publicSeedsEmpty.classList.toggle("hidden", items.length > 0);
+  els.publicSeedsPanel?.classList.toggle("has-seeds", items.length > 0);
+  if (els.publicSeedsCount) {
+    els.publicSeedsCount.textContent = `${items.length} ${items.length === 1 ? "seed" : "seeds"}`;
+  }
+
+  for (const item of items) {
+    const clean = sanitizeFavorite(item);
+    if (!clean) continue;
+    const topSeed = isTopSeed(clean, items);
+    const locations = clean.nearby?.length ? clean.nearby : [];
+    const liked = publicSeedIsLiked(clean);
+    const userName = clean.user?.name || "Community";
+    const card = document.createElement("article");
+    card.className = `public-seed-card${topSeed ? " is-top-seed" : ""}${liked ? " is-liked" : ""}`;
+    card.innerHTML = `
+      <div class="public-seed-top">
+        <div class="public-seed-main">
+          <span class="public-seed-rank">${topSeed ? "Top seed" : "Community pick"}</span>
+          <span class="public-seed-value">${escapeHtml(clean.seed)}</span>
+          <span class="public-seed-sub">${escapeHtml(clean.versionLabel || clean.version)} &middot; ${escapeHtml(clean.dimensionLabel || dimensionText(clean.dimension))} &middot; by ${escapeHtml(userName)}</span>
+        </div>
+        <button class="public-seed-likes" type="button" title="${liked ? "Unlike this seed" : "Like this seed"}" aria-pressed="${String(liked)}">${ICONS.heart}<span>${escapeHtml(publicSeedLikesText(clean))}</span></button>
+      </div>
+      <div class="public-seed-meta">
+        <span>Center ${escapeHtml(clean.centerX)}, ${escapeHtml(clean.centerZ)}</span>
+        <span>Saved ${escapeHtml(compactDate(clean.savedAt))}</span>
+      </div>
+      <div class="public-seed-nearby">
+        ${locations.length
+          ? locations.map(location => `<span>${escapeHtml(location.label)} <b>${escapeHtml(distanceText(location.distance))}</b></span>`).join("")
+          : `<span>No nearby locations saved yet</span>`}
+      </div>
+      <div class="public-seed-actions">
+        <button class="mini-link public-load" type="button">${ICONS.play}<span>Load</span></button>
+        <button class="mini-link public-copy" type="button">${ICONS.copy}<span>Copy</span></button>
+        <button class="mini-link public-share" type="button">${ICONS.link}<span>Share</span></button>
+      </div>
+    `;
+    card.querySelector(".public-seed-likes").addEventListener("click", () => togglePublicSeedLike(clean));
+    card.querySelector(".public-load").addEventListener("click", () => loadFavoriteSeed(clean));
+    card.querySelector(".public-copy").addEventListener("click", () => copyText(clean.seed, "Seed copied"));
+    card.querySelector(".public-share").addEventListener("click", () => copyText(buildSeedCardShareUrl(clean), "Seed link copied"));
+    els.publicSeedsList.append(card);
+  }
+  queueFrameHeightPost();
+}
+
+async function loadPublicSeedCards() {
+  if (!els.publicSeedsList || state.publicSeedsBusy) return;
+  state.publicSeedsBusy = true;
+  els.refreshPublicSeeds?.classList.add("is-loading");
+  try {
+    const path = SEED_VAULT_ENABLED
+      ? seedVaultPath(`/api/v2/seed-vault/public-seeds?page=1&per_page=${PUBLIC_SEEDS_LIMIT}`)
+      : `/api/seeds/public?limit=${PUBLIC_SEEDS_LIMIT}`;
+    const data = await seedApiRequest(path, { method: "GET", headers: {} });
+    const seeds = seedApiResponseList(data);
+    state.publicSeeds = seeds.map(sanitizeFavorite).filter(Boolean);
+  } catch (err) {
+    console.warn("Public seed API unavailable; using local favorites", err);
+    state.publicSeeds = [];
+  } finally {
+    state.publicSeedsBusy = false;
+    els.refreshPublicSeeds?.classList.remove("is-loading");
+    renderPublicSeedCards();
+  }
+}
+
+async function restorePendingLikedSeed() {
+  if (!seedAuthWasCompleted()) return;
+  let item = null;
+  try {
+    item = sanitizeFavorite(JSON.parse(sessionStorage.getItem(PENDING_LIKED_SEED_STORAGE_KEY) || "null"));
+    sessionStorage.removeItem(PENDING_LIKED_SEED_STORAGE_KEY);
+  } catch {
+    item = null;
+  }
+  clearSeedAuthReturnParam();
+  if (item) await addFavoriteSeed(item, { skipAuth: true, fromAuth: true });
+}
+
 function initFavoriteSeeds() {
   readFavoriteSeeds();
   renderFavoriteSeeds();
+  renderPublicSeedCards();
   updateFavoriteButtons();
+  loadPublicSeedCards();
+  restorePendingLikedSeed();
 }
 
 function copyCoords(point, label = "Coordinates copied") {
@@ -645,7 +1309,24 @@ function bindEvents() {
   els.likeActiveSeed?.addEventListener("click", toggleCurrentFavorite);
   els.favoritesBtn?.addEventListener("click", () => setFavoritesVisible(true));
   els.favoritesClose?.addEventListener("click", () => setFavoritesVisible(false));
+  els.refreshPublicSeeds?.addEventListener("click", loadPublicSeedCards);
+  els.seedAuthForm?.addEventListener("submit", submitSeedAuth);
+  els.seedAuthLoginTab?.addEventListener("click", () => setSeedAuthMode("login"));
+  els.seedAuthRegisterTab?.addEventListener("click", () => setSeedAuthMode("register"));
+  els.seedAuthClose?.addEventListener("click", () => {
+    pendingSeedVaultAuth = null;
+    setSeedAuthVisible(false);
+  });
+  els.seedAuthBackdrop?.addEventListener("click", () => {
+    pendingSeedVaultAuth = null;
+    setSeedAuthVisible(false);
+  });
   window.addEventListener("keydown", event => {
+    if (event.key === "Escape" && els.seedAuthModal && !els.seedAuthModal.classList.contains("is-hidden")) {
+      pendingSeedVaultAuth = null;
+      setSeedAuthVisible(false);
+      return;
+    }
     if (event.key === "Escape" && !els.finderPanel.classList.contains("is-hidden")) {
       setFinderVisible(false);
     }

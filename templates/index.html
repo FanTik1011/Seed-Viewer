@@ -3,6 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, follow">
+
 <title>SeedMap</title>
 <link rel="stylesheet" href="{{ base_path }}/static/styles.css?v={{ cache_bust }}">
 </head>
@@ -293,11 +295,67 @@
       <span>Seed Finder</span>
     </button>
   </main>
+
+  <section class="public-seeds-panel" id="public-seeds-panel" aria-live="polite">
+    <div class="public-seeds-inner">
+      <div class="public-seeds-head">
+        <div>
+          <span class="tiny-label">Community seeds</span>
+          <strong>Liked by players</strong>
+          <span class="public-seeds-count" id="public-seeds-count">0 seeds</span>
+        </div>
+        <button class="icon-only" id="refresh-public-seeds" type="button" title="Refresh community seeds"></button>
+      </div>
+      <div class="public-seeds-empty" id="public-seeds-empty">
+        <strong>No liked seeds yet</strong>
+        <span>Press the heart on the current seed to add the first card here.</span>
+      </div>
+      <div class="public-seeds-list" id="public-seeds-list"></div>
+    </div>
+  </section>
+
+  <div class="seed-auth-modal is-hidden" id="seed-auth-modal" aria-hidden="true">
+    <div class="seed-auth-backdrop" id="seed-auth-backdrop"></div>
+    <form class="seed-auth-card" id="seed-auth-form">
+      <div class="seed-auth-head">
+        <div>
+          <span class="tiny-label">SeedVault</span>
+          <strong id="seed-auth-title">Log in</strong>
+        </div>
+        <button class="icon-only" id="seed-auth-close" type="button" aria-label="Close"></button>
+      </div>
+      <div class="seed-auth-tabs">
+        <button class="mini-link is-active" id="seed-auth-login-tab" type="button">Login</button>
+        <button class="mini-link" id="seed-auth-register-tab" type="button">Register</button>
+      </div>
+      <label class="seed-auth-field seed-auth-name-row is-hidden">
+        <span>Name</span>
+        <input class="field" id="seed-auth-name" type="text" autocomplete="name" maxlength="255" placeholder="Player name">
+      </label>
+      <label class="seed-auth-field">
+        <span>Email</span>
+        <input class="field" id="seed-auth-email" type="email" autocomplete="email" placeholder="player@example.com" required>
+      </label>
+      <label class="seed-auth-field">
+        <span>Password</span>
+        <input class="field" id="seed-auth-password" type="password" autocomplete="current-password" placeholder="Password" required>
+      </label>
+      <label class="seed-auth-field seed-auth-confirm-row is-hidden">
+        <span>Confirm password</span>
+        <input class="field" id="seed-auth-password-confirm" type="password" autocomplete="new-password" placeholder="Repeat password">
+      </label>
+      <div class="seed-auth-error" id="seed-auth-error" role="alert"></div>
+      <button class="btn primary seed-auth-submit" id="seed-auth-submit" type="submit">Continue</button>
+    </form>
+  </div>
 </div>
 
 <script>
 window.SEED_VIEWER_BASE_PATH = "{{ base_path }}";
 window.SEED_VIEWER_PERF_MODE = {{ perf_mode|tojson }};
+window.SEED_VIEWER_AUTH_URL = {{ seed_auth_url|tojson }};
+window.SEED_VIEWER_SEED_API_BASE = {{ seed_api_base|tojson }};
+window.SEED_VIEWER_SEED_API_MODE = {{ seed_api_mode|tojson }};
 </script>
 <script src="{{ base_path }}/static/js/config.js?v={{ cache_bust }}"></script>
 <script src="{{ base_path }}/static/js/data.js?v={{ cache_bust }}"></script>

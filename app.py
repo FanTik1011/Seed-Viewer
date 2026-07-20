@@ -2,13 +2,17 @@ from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 import base64
 import ctypes
+import json
 import os
 import sys
 import random
 import logging
 import math
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 from functools import lru_cache
+from threading import Lock
 
 logging.basicConfig(
     level=logging.INFO,
@@ -25,6 +29,15 @@ def _normalise_base_path(value: str) -> str:
 
 PUBLIC_BASE_PATH = _normalise_base_path(os.environ.get("PUBLIC_BASE_PATH", ""))
 PUBLIC_PERF_MODE = os.environ.get("PUBLIC_PERF_MODE", "heroku" if os.environ.get("DYNO") else "").strip().lower()
+SEED_AUTH_URL = os.environ.get("SEED_AUTH_URL", "").strip()
+SEED_API_BASE = os.environ.get("SEED_API_BASE", PUBLIC_BASE_PATH).strip().rstrip("/")
+SEED_API_MODE = os.environ.get("SEED_API_MODE", "").strip().lower()
+SEED_MOCK_API_ENABLED = os.environ.get("SEED_MOCK_API_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
+SAVED_SEEDS_PATH = os.environ.get(
+    "SAVED_SEEDS_PATH",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "saved_seeds.json"),
+)
+_saved_seeds_lock = Lock()
 
 
 class PrefixMiddleware:
@@ -44,6 +57,12 @@ app = Flask(__name__, static_folder='static', template_folder='templates')
 CORS(app, origins=["http://localhost:*", "http://127.0.0.1:*"])
 if PUBLIC_BASE_PATH:
     app.wsgi_app = PrefixMiddleware(app.wsgi_app, PUBLIC_BASE_PATH)
+
+
+@app.before_request
+def block_disabled_seed_vault_mock():
+    if request.path.startswith("/api/v2/seed-vault") and not SEED_MOCK_API_ENABLED:
+        return jsonify({"message": "SeedVault mock API is disabled."}), 404
 
 def _find_lib():
     base = os.path.dirname(os.path.abspath(__file__))
@@ -877,6 +896,198 @@ def _biome_grid_cached(seed: int, mc: int, dim_id: int,
 import time as _time
 _CACHE_BUST = str(int(_time.time()))
 
+
+def _seed_record_key(seed: str, version: str, dimension: str) -> str:
+    return f"{seed}|{version}|{dimension}"
+
+
+def _safe_int(value, default: int = 0) -> int:
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_float(value, default: float = 0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _read_saved_seed_records() -> list[dict]:
+    if not os.path.exists(SAVED_SEEDS_PATH):
+        return []
+    try:
+        with open(SAVED_SEEDS_PATH, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        log.warning("Could not read saved seeds from %s", SAVED_SEEDS_PATH)
+        return []
+    return data if isinstance(data, list) else []
+
+
+def _write_saved_seed_records(records: list[dict]) -> None:
+    seed_dir = os.path.dirname(SAVED_SEEDS_PATH)
+    if seed_dir:
+        os.makedirs(seed_dir, exist_ok=True)
+    tmp_path = SAVED_SEEDS_PATH + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as fh:
+        json.dump(records[:200], fh, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, SAVED_SEEDS_PATH)
+
+
+def _clean_seed_record(payload: dict) -> dict | None:
+    if not isinstance(payload, dict):
+        return None
+    raw_seed = payload.get("seed")
+    seed = "" if raw_seed is None else str(raw_seed).strip()[:96]
+    if not seed:
+        return None
+    version = str(payload.get("version") or "1.20")[:32]
+    dimension = str(payload.get("dimension") or "overworld")
+    if dimension not in {"overworld", "nether", "end"}:
+        dimension = "overworld"
+
+    now = datetime.now(timezone.utc).isoformat()
+    nearby = []
+    nearby_payload = payload.get("nearby")
+    if not isinstance(nearby_payload, list):
+        nearby_payload = []
+    for item in nearby_payload:
+        if not isinstance(item, dict):
+            continue
+        nearby.append({
+            "label": str(item.get("label") or "Location")[:48],
+            "x": _safe_int(item.get("x"), 0),
+            "z": _safe_int(item.get("z"), 0),
+            "distance": max(0, _safe_int(item.get("distance"), 0)),
+        })
+        if len(nearby) >= 4:
+            break
+    user_payload = payload.get("user") if isinstance(payload.get("user"), dict) else {}
+    user = {
+        "id": str(user_payload.get("id") or payload.get("userId") or "")[:96],
+        "name": str(user_payload.get("name") or "Player")[:48],
+        "avatar": str(user_payload.get("avatar") or "")[:300],
+    }
+    liked_by_payload = payload.get("likedBy")
+    liked_by = []
+    if isinstance(liked_by_payload, list):
+        for user_id in liked_by_payload:
+            value = str(user_id).strip()[:96]
+            if value and value not in liked_by:
+                liked_by.append(value)
+            if len(liked_by) >= 500:
+                break
+    if user["id"] and user["id"] not in liked_by:
+        liked_by.append(user["id"])
+    record = {
+        "id": str(payload.get("id") or "")[:96],
+        "key": _seed_record_key(seed, version, dimension),
+        "title": str(payload.get("title") or f"Seed {seed}")[:255],
+        "seed": seed,
+        "version": version,
+        "versionLabel": str(payload.get("versionLabel") or version)[:64],
+        "dimension": dimension,
+        "dimensionLabel": str(payload.get("dimensionLabel") or dimension.title())[:32],
+        "centerX": _safe_int(payload.get("centerX"), 0),
+        "centerZ": _safe_int(payload.get("centerZ"), 0),
+        "zoom": _safe_float(payload.get("zoom"), 2),
+        "savedAt": str(payload.get("savedAt") or now),
+        "lastLoadedAt": str(payload.get("lastLoadedAt") or ""),
+        "loadCount": max(0, _safe_int(payload.get("loadCount"), 0)),
+        "likes": max(1, len(liked_by), _safe_int(payload.get("likes"), 1)),
+        "likedBy": liked_by,
+        "user": user,
+        "nearby": nearby,
+    }
+    return record
+
+
+def _seed_record_id(record: dict) -> str:
+    record_id = str(record.get("id") or "").strip()
+    if record_id:
+        return record_id
+    key = str(record.get("key") or _seed_record_key(
+        str(record.get("seed") or ""),
+        str(record.get("version") or "1.20"),
+        str(record.get("dimension") or "overworld"),
+    ))
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"godlike-seed-vault:{key}"))
+
+
+def _seed_vault_user_id() -> str:
+    auth = request.headers.get("Authorization", "")
+    prefix = "Bearer "
+    if auth.startswith(prefix):
+        token = auth[len(prefix):].strip()
+        if token:
+            return token[:96]
+    return ""
+
+
+def _seed_vault_auth_required() -> str | None:
+    user_id = _seed_vault_user_id()
+    if not user_id:
+        return None
+    return user_id
+
+
+def _seed_vault_request_payload(user_id: str) -> dict:
+    payload = request.get_json(silent=True) or {}
+    dimension = str(payload.get("dimension") or "overworld")
+    if dimension == "the_end":
+        dimension = "end"
+    return {
+        "id": str(payload.get("id") or ""),
+        "title": str(payload.get("title") or f"Seed {payload.get('seed', '')}")[:255],
+        "seed": payload.get("seed"),
+        "version": payload.get("version") or "1.20",
+        "dimension": dimension,
+        "centerX": payload.get("centerX"),
+        "centerZ": payload.get("centerZ"),
+        "nearby": payload.get("nearby_locations") if isinstance(payload.get("nearby_locations"), list) else payload.get("nearby"),
+        "user": {
+            "id": user_id,
+            "name": str(payload.get("user", {}).get("name") if isinstance(payload.get("user"), dict) else "Local Player")[:48],
+        },
+    }
+
+
+def _seed_vault_response_record(record: dict, user_id: str = "") -> dict:
+    record_id = _seed_record_id(record)
+    liked_by = [str(x) for x in record.get("likedBy", []) if str(x)]
+    dimension = str(record.get("dimension") or "overworld")
+    if dimension == "end":
+        dimension = "the_end"
+    user = record.get("user") if isinstance(record.get("user"), dict) else {}
+    return {
+        "id": record_id,
+        "title": str(record.get("title") or f"Seed {record.get('seed', '')}"),
+        "seed": str(record.get("seed") or ""),
+        "version": record.get("version") or "1.20",
+        "dimension": dimension,
+        "centerX": _safe_int(record.get("centerX"), 0),
+        "centerZ": _safe_int(record.get("centerZ"), 0),
+        "likes_count": max(0, len(liked_by), _safe_int(record.get("likes"), 0)),
+        "liked_by_me": bool(user_id and user_id in liked_by),
+        "nearby_locations": record.get("nearby") if isinstance(record.get("nearby"), list) else [],
+        "user": {
+            "id": str(user.get("id") or ""),
+            "name": str(user.get("name") or "Player"),
+        },
+        "created_at": record.get("savedAt") or None,
+        "updated_at": record.get("lastLoadedAt") or record.get("savedAt") or None,
+    }
+
+
+def _seed_vault_find_index(records: list[dict], seed_id: str) -> int:
+    for index, record in enumerate(records):
+        if _seed_record_id(record) == seed_id:
+            return index
+    return -1
+
 @app.route('/')
 def index():
     return render_template(
@@ -884,6 +1095,9 @@ def index():
         base_path=PUBLIC_BASE_PATH,
         cache_bust=_CACHE_BUST,
         perf_mode=PUBLIC_PERF_MODE,
+        seed_auth_url=SEED_AUTH_URL,
+        seed_api_base=SEED_API_BASE,
+        seed_api_mode=SEED_API_MODE,
     )
 
 
@@ -925,6 +1139,270 @@ def random_seed():
     else:
         seed = random.randint(-9_999_999_999, 9_999_999_999)
     return jsonify({"seed": str(seed)})
+
+
+@app.route('/api/seeds/public')
+def public_seeds():
+    try:
+        limit = max(1, min(48, int(request.args.get("limit", 12))))
+    except ValueError:
+        limit = 12
+    with _saved_seeds_lock:
+        records = _read_saved_seed_records()
+    records.sort(key=lambda item: (item.get("likes", 0), item.get("savedAt", "")), reverse=True)
+    return jsonify({"seeds": records[:limit]})
+
+
+@app.route('/api/me/seeds')
+def my_saved_seeds():
+    with _saved_seeds_lock:
+        records = _read_saved_seed_records()
+    records.sort(key=lambda item: item.get("savedAt", ""), reverse=True)
+    return jsonify({"seeds": records})
+
+
+@app.route('/api/seeds/save', methods=['POST'])
+def save_seed():
+    record = _clean_seed_record(request.get_json(silent=True) or {})
+    if not record:
+        return jsonify({"error": "Seed is required"}), 400
+
+    with _saved_seeds_lock:
+        records = _read_saved_seed_records()
+        index = next((i for i, item in enumerate(records) if item.get("key") == record["key"]), -1)
+        if index >= 0:
+            existing = records[index]
+            liked_by = list(dict.fromkeys(
+                [str(x) for x in existing.get("likedBy", []) if str(x)] +
+                [str(x) for x in record.get("likedBy", []) if str(x)]
+            ))
+            record["likedBy"] = liked_by
+            record["likes"] = max(1, len(liked_by), _safe_int(existing.get("likes"), 1), _safe_int(record.get("likes"), 1))
+            record["savedAt"] = existing.get("savedAt") or record["savedAt"]
+            records[index] = {**existing, **record}
+        else:
+            records.insert(0, record)
+        _write_saved_seed_records(records)
+
+    return jsonify({"seed": record})
+
+
+@app.route('/api/seeds/like', methods=['POST'])
+def like_seed():
+    record = _clean_seed_record(request.get_json(silent=True) or {})
+    if not record:
+        return jsonify({"error": "Seed is required"}), 400
+    user_id = record.get("user", {}).get("id") or ""
+
+    with _saved_seeds_lock:
+        records = _read_saved_seed_records()
+        index = next((i for i, item in enumerate(records) if item.get("key") == record["key"]), -1)
+        if index >= 0:
+            existing = records[index]
+            record = {**existing, **record}
+            liked_by = list(dict.fromkeys([str(x) for x in existing.get("likedBy", []) if str(x)]))
+            if user_id and user_id not in liked_by:
+                liked_by.append(user_id)
+            record["likedBy"] = liked_by
+            record["likes"] = max(1, len(liked_by), _safe_int(existing.get("likes"), 1))
+            record["savedAt"] = existing.get("savedAt") or record["savedAt"]
+        else:
+            record["likes"] = max(1, len(record.get("likedBy", [])), _safe_int(record.get("likes"), 1))
+        if index >= 0:
+            records[index] = record
+        else:
+            records.insert(0, record)
+        _write_saved_seed_records(records)
+
+    return jsonify({"seed": record})
+
+
+@app.route('/api/seeds/unlike', methods=['POST'])
+def unlike_seed():
+    record = _clean_seed_record(request.get_json(silent=True) or {})
+    if not record:
+        return jsonify({"error": "Seed is required"}), 400
+    user_id = record.get("user", {}).get("id") or ""
+
+    with _saved_seeds_lock:
+        records = _read_saved_seed_records()
+        index = next((i for i, item in enumerate(records) if item.get("key") == record["key"]), -1)
+        if index >= 0:
+            existing = records[index]
+            liked_by = [str(x) for x in existing.get("likedBy", []) if str(x) and str(x) != user_id]
+            record = {**existing, **record, "likedBy": liked_by}
+            record["likes"] = max(0, len(liked_by))
+            record["savedAt"] = existing.get("savedAt") or record["savedAt"]
+            records[index] = record
+        else:
+            record["likedBy"] = []
+            record["likes"] = 0
+            records.insert(0, record)
+        _write_saved_seed_records(records)
+
+    return jsonify({"seed": record})
+
+
+@app.route('/api/v2/seed-vault/auth/register', methods=['POST'])
+def seed_vault_mock_register():
+    payload = request.get_json(silent=True) or {}
+    email = str(payload.get("email") or "local@example.test").strip().lower()
+    token = f"local-seed-vault|{uuid.uuid5(uuid.NAMESPACE_DNS, email)}"
+    return jsonify({"success": True, "data": {"token": token}})
+
+
+@app.route('/api/v2/seed-vault/auth/login', methods=['POST'])
+def seed_vault_mock_login():
+    return seed_vault_mock_register()
+
+
+@app.route('/api/v2/seed-vault/auth/logout', methods=['POST'])
+def seed_vault_mock_logout():
+    return jsonify({"success": True, "data": {"message": "Token revoked."}})
+
+
+@app.route('/api/v2/seed-vault/public-seeds')
+def seed_vault_public_seeds():
+    user_id = _seed_vault_user_id()
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+        per_page = max(1, min(100, int(request.args.get("per_page", 20))))
+    except ValueError:
+        return jsonify({"message": "Invalid query parameters.", "errors": {"page": ["Invalid page."]}}), 422
+
+    search = str(request.args.get("search") or "").strip().lower()
+    with _saved_seeds_lock:
+        records = _read_saved_seed_records()
+    public_records = [record for record in records if _safe_int(record.get("likes"), 0) > 0 or record.get("likedBy")]
+    if search:
+        public_records = [record for record in public_records if search in str(record.get("title") or "").lower()]
+    public_records.sort(key=lambda item: (_safe_int(item.get("likes"), 0), item.get("savedAt", "")), reverse=True)
+
+    total = len(public_records)
+    start = (page - 1) * per_page
+    page_records = public_records[start:start + per_page]
+    return jsonify({
+        "success": True,
+        "data": [_seed_vault_response_record(record, user_id) for record in page_records],
+        "meta": {
+            "current_page": page,
+            "last_page": max(1, math.ceil(total / per_page)) if total else 1,
+            "from": start + 1 if page_records else None,
+            "to": start + len(page_records) if page_records else None,
+            "limit": per_page,
+            "total": total,
+        },
+    })
+
+
+@app.route('/api/v2/seed-vault/seeds', methods=['GET', 'POST'])
+def seed_vault_seeds():
+    user_id = _seed_vault_auth_required()
+    if not user_id:
+        return jsonify({"message": "Unauthenticated."}), 400
+
+    if request.method == 'GET':
+        with _saved_seeds_lock:
+            records = [
+                record for record in _read_saved_seed_records()
+                if str(record.get("user", {}).get("id") if isinstance(record.get("user"), dict) else "") == user_id
+            ]
+        records.sort(key=lambda item: item.get("savedAt", ""), reverse=True)
+        return jsonify({
+            "success": True,
+            "data": [_seed_vault_response_record(record, user_id) for record in records],
+            "meta": {
+                "current_page": 1,
+                "last_page": 1,
+                "from": 1 if records else None,
+                "to": len(records) if records else None,
+                "limit": len(records) or 20,
+                "total": len(records),
+            },
+        })
+
+    record = _clean_seed_record(_seed_vault_request_payload(user_id))
+    if not record:
+        return jsonify({"message": "The seed field is required.", "errors": {"seed": ["The seed field is required."]}}), 422
+    record["id"] = record.get("id") or _seed_record_id(record)
+    record["likedBy"] = []
+    record["likes"] = 0
+
+    with _saved_seeds_lock:
+        records = _read_saved_seed_records()
+        index = next((i for i, item in enumerate(records) if item.get("key") == record["key"]), -1)
+        if index >= 0:
+            existing = records[index]
+            record["id"] = existing.get("id") or record["id"]
+            record["likedBy"] = existing.get("likedBy", [])
+            record["likes"] = _safe_int(existing.get("likes"), 0)
+            record["savedAt"] = existing.get("savedAt") or record["savedAt"]
+            records[index] = {**existing, **record}
+        else:
+            records.insert(0, record)
+        _write_saved_seed_records(records)
+
+    return jsonify({"success": True, "data": _seed_vault_response_record(record, user_id)}), 201
+
+
+@app.route('/api/v2/seed-vault/seeds/<seed_id>', methods=['GET', 'PUT', 'PATCH', 'DELETE'])
+def seed_vault_seed(seed_id):
+    user_id = _seed_vault_auth_required()
+    if not user_id:
+        return jsonify({"message": "Unauthenticated."}), 400
+
+    with _saved_seeds_lock:
+        records = _read_saved_seed_records()
+        index = _seed_vault_find_index(records, seed_id)
+        if index < 0:
+            return jsonify({"success": False, "message": "Seed not found."}), 404
+
+        if request.method == 'DELETE':
+            records.pop(index)
+            _write_saved_seed_records(records)
+            return jsonify({"success": True, "data": {"message": "Seed deleted."}})
+
+        if request.method in {'PUT', 'PATCH'}:
+            updated = _clean_seed_record({**_seed_vault_request_payload(user_id), "id": seed_id})
+            if not updated:
+                return jsonify({"message": "The seed field is required.", "errors": {"seed": ["The seed field is required."]}}), 422
+            existing = records[index]
+            updated["id"] = seed_id
+            updated["likedBy"] = existing.get("likedBy", [])
+            updated["likes"] = _safe_int(existing.get("likes"), 0)
+            updated["savedAt"] = existing.get("savedAt") or updated["savedAt"]
+            records[index] = {**existing, **updated}
+            _write_saved_seed_records(records)
+            return jsonify({"success": True, "data": _seed_vault_response_record(records[index], user_id)})
+
+        return jsonify({"success": True, "data": _seed_vault_response_record(records[index], user_id)})
+
+
+@app.route('/api/v2/seed-vault/seeds/<seed_id>/like', methods=['POST', 'DELETE'])
+def seed_vault_seed_like(seed_id):
+    user_id = _seed_vault_auth_required()
+    if not user_id:
+        return jsonify({"message": "Unauthenticated."}), 400
+
+    with _saved_seeds_lock:
+        records = _read_saved_seed_records()
+        index = _seed_vault_find_index(records, seed_id)
+        if index < 0:
+            return jsonify({"success": False, "message": "Seed not found."}), 404
+
+        record = records[index]
+        liked_by = list(dict.fromkeys([str(x) for x in record.get("likedBy", []) if str(x)]))
+        if request.method == 'POST' and user_id not in liked_by:
+            liked_by.append(user_id)
+        if request.method == 'DELETE':
+            liked_by = [liked for liked in liked_by if liked != user_id]
+        record["likedBy"] = liked_by
+        record["likes"] = len(liked_by)
+        record["lastLoadedAt"] = datetime.now(timezone.utc).isoformat()
+        records[index] = record
+        _write_saved_seed_records(records)
+
+    return jsonify({"success": True, "data": _seed_vault_response_record(record, user_id)})
 
 
 @app.route('/api/biomes')

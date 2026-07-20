@@ -33,6 +33,8 @@ function bootIcons() {
   setIcon("close-popover", "close");
   setIcon("share-url-btn", "link", "Share");
   setIcon("close-favorites", "close");
+  setIcon("refresh-public-seeds", "shuffle");
+  setIcon("seed-auth-close", "close");
   if (document.getElementById("favorites-head-icon")) {
     document.getElementById("favorites-head-icon").innerHTML = iconMarkup("heart");
   }

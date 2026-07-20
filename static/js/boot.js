@@ -1,5 +1,6 @@
 bootIcons();
 initFavoriteSeeds();
+initFrameResizeBridge();
 initWorker();
 bindEvents();
 resizeCanvas();
