@@ -33,6 +33,7 @@ SEED_AUTH_URL = os.environ.get("SEED_AUTH_URL", "").strip()
 SEED_API_BASE = os.environ.get("SEED_API_BASE", PUBLIC_BASE_PATH).strip().rstrip("/")
 SEED_API_MODE = os.environ.get("SEED_API_MODE", "").strip().lower()
 SEED_MOCK_API_ENABLED = os.environ.get("SEED_MOCK_API_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
+DAILY_SEED_SAVE_LIMIT = 10
 SAVED_SEEDS_PATH = os.environ.get(
     "SAVED_SEEDS_PATH",
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "saved_seeds.json"),
@@ -993,6 +994,9 @@ def _clean_seed_record(payload: dict) -> dict | None:
         "dimensionLabel": str(payload.get("dimensionLabel") or dimension.title())[:32],
         "centerX": _safe_int(payload.get("centerX"), 0),
         "centerZ": _safe_int(payload.get("centerZ"), 0),
+        "spawnX": _safe_int(payload.get("spawnX") if "spawnX" in payload else payload.get("spawn_x"), 0),
+        "spawnZ": _safe_int(payload.get("spawnZ") if "spawnZ" in payload else payload.get("spawn_z"), 0),
+        "previewUrl": str(payload.get("previewUrl") or payload.get("preview_url") or "")[:800000],
         "zoom": _safe_float(payload.get("zoom"), 2),
         "savedAt": str(payload.get("savedAt") or now),
         "lastLoadedAt": str(payload.get("lastLoadedAt") or ""),
@@ -1034,6 +1038,19 @@ def _seed_vault_auth_required() -> str | None:
     return user_id
 
 
+def _record_owner_id(record: dict) -> str:
+    user = record.get("user") if isinstance(record.get("user"), dict) else {}
+    return str(user.get("id") or "")
+
+
+def _seed_saved_today_count(records: list[dict], user_id: str) -> int:
+    today = datetime.now(timezone.utc).date().isoformat()
+    return sum(
+        1 for record in records
+        if _record_owner_id(record) == user_id and str(record.get("savedAt") or "").startswith(today)
+    )
+
+
 def _seed_vault_request_payload(user_id: str) -> dict:
     payload = request.get_json(silent=True) or {}
     dimension = str(payload.get("dimension") or "overworld")
@@ -1047,6 +1064,9 @@ def _seed_vault_request_payload(user_id: str) -> dict:
         "dimension": dimension,
         "centerX": payload.get("centerX"),
         "centerZ": payload.get("centerZ"),
+        "spawnX": payload.get("spawnX") if "spawnX" in payload else payload.get("spawn_x"),
+        "spawnZ": payload.get("spawnZ") if "spawnZ" in payload else payload.get("spawn_z"),
+        "previewUrl": payload.get("previewUrl") or payload.get("preview_url") or "",
         "nearby": payload.get("nearby_locations") if isinstance(payload.get("nearby_locations"), list) else payload.get("nearby"),
         "user": {
             "id": user_id,
@@ -1070,6 +1090,9 @@ def _seed_vault_response_record(record: dict, user_id: str = "") -> dict:
         "dimension": dimension,
         "centerX": _safe_int(record.get("centerX"), 0),
         "centerZ": _safe_int(record.get("centerZ"), 0),
+        "spawnX": _safe_int(record.get("spawnX"), 0),
+        "spawnZ": _safe_int(record.get("spawnZ"), 0),
+        "preview_url": str(record.get("previewUrl") or ""),
         "likes_count": max(0, len(liked_by), _safe_int(record.get("likes"), 0)),
         "liked_by_me": bool(user_id and user_id in liked_by),
         "nearby_locations": record.get("nearby") if isinstance(record.get("nearby"), list) else [],
@@ -1170,6 +1193,9 @@ def save_seed():
     with _saved_seeds_lock:
         records = _read_saved_seed_records()
         index = next((i for i, item in enumerate(records) if item.get("key") == record["key"]), -1)
+        user_id = _record_owner_id(record)
+        if index < 0 and user_id and _seed_saved_today_count(records, user_id) >= DAILY_SEED_SAVE_LIMIT:
+            return jsonify({"error": f"Daily seed limit reached. Max {DAILY_SEED_SAVE_LIMIT} seeds per day."}), 429
         if index >= 0:
             existing = records[index]
             liked_by = list(dict.fromkeys(
@@ -1241,6 +1267,20 @@ def unlike_seed():
         _write_saved_seed_records(records)
 
     return jsonify({"seed": record})
+
+
+@app.route('/api/seeds/delete', methods=['POST'])
+def delete_seed():
+    record = _clean_seed_record(request.get_json(silent=True) or {})
+    if not record:
+        return jsonify({"error": "Seed is required"}), 400
+
+    with _saved_seeds_lock:
+        records = _read_saved_seed_records()
+        records = [item for item in records if item.get("key") != record["key"]]
+        _write_saved_seed_records(records)
+
+    return jsonify({"success": True})
 
 
 @app.route('/api/v2/seed-vault/auth/register', methods=['POST'])
@@ -1331,6 +1371,12 @@ def seed_vault_seeds():
     with _saved_seeds_lock:
         records = _read_saved_seed_records()
         index = next((i for i, item in enumerate(records) if item.get("key") == record["key"]), -1)
+        if index < 0 and _seed_saved_today_count(records, user_id) >= DAILY_SEED_SAVE_LIMIT:
+            return jsonify({
+                "success": False,
+                "message": f"Daily seed limit reached. You can save up to {DAILY_SEED_SAVE_LIMIT} seeds per day.",
+                "errors": {"seed": [f"Daily seed limit reached. Max {DAILY_SEED_SAVE_LIMIT} seeds per day."]},
+            }), 429
         if index >= 0:
             existing = records[index]
             record["id"] = existing.get("id") or record["id"]
@@ -1358,6 +1404,8 @@ def seed_vault_seed(seed_id):
             return jsonify({"success": False, "message": "Seed not found."}), 404
 
         if request.method == 'DELETE':
+            if _record_owner_id(records[index]) != user_id:
+                return jsonify({"success": False, "message": "Forbidden."}), 403
             records.pop(index)
             _write_saved_seed_records(records)
             return jsonify({"success": True, "data": {"message": "Seed deleted."}})

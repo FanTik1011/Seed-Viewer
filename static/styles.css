@@ -7723,6 +7723,264 @@
     }
   }
 
+  /* Featured-style community cards */
+  .public-seeds-panel {
+    background:
+      linear-gradient(180deg, rgba(7,8,11,.98), rgba(7,8,10,.99)),
+      var(--bg);
+  }
+
+  .public-seeds-inner {
+    width: min(1480px, 100%);
+    gap: 18px;
+  }
+
+  .public-seeds-list {
+    grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+    gap: 22px;
+  }
+
+  .public-seed-card {
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 292px auto auto auto auto;
+    align-items: stretch;
+    gap: 0;
+    padding: 0;
+    overflow: hidden;
+    border-radius: 8px;
+    background: #1b1b21;
+    border: 1px solid rgba(255,255,255,.13);
+    box-shadow: 0 18px 38px rgba(0,0,0,.34), inset 0 1px rgba(255,255,255,.06);
+  }
+
+  .public-seed-card:hover {
+    border-color: rgba(140,255,99,.35);
+    box-shadow: 0 24px 48px rgba(0,0,0,.42), inset 0 1px rgba(255,255,255,.07);
+  }
+
+  .public-seed-card.is-top-seed {
+    border-color: rgba(93,196,87,.58);
+    box-shadow: 0 24px 52px rgba(0,0,0,.42), 0 0 0 1px rgba(93,196,87,.18);
+  }
+
+  .public-seed-preview {
+    position: relative;
+    grid-column: 1;
+    grid-row: 1;
+    display: block;
+    align-self: stretch;
+    width: 100%;
+    height: 100%;
+    min-height: 210px;
+    overflow: hidden;
+    background-color: #24472d;
+    background-size: cover;
+    background-position: center;
+    image-rendering: auto;
+  }
+
+  .public-seed-preview:not(.has-preview) {
+    background: linear-gradient(180deg, #20242b, #161920);
+  }
+
+  .public-seed-preview::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(180deg, rgba(0,0,0,.08), transparent 42%, rgba(0,0,0,.26)),
+      repeating-linear-gradient(0deg, rgba(255,255,255,.022) 0 1px, transparent 1px 32px),
+      repeating-linear-gradient(90deg, rgba(255,255,255,.018) 0 1px, transparent 1px 32px);
+    pointer-events: none;
+  }
+
+  .public-seed-map-grid {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    display: grid;
+    grid-template-columns: repeat(32, minmax(0, 1fr));
+    grid-template-rows: repeat(14, minmax(0, 1fr));
+    background: #24472d;
+    image-rendering: pixelated;
+  }
+
+  .public-seed-map-cell {
+    min-width: 0;
+    min-height: 0;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,.045);
+  }
+
+  .public-seed-preview-placeholder {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    display: grid;
+    place-content: center;
+    gap: 6px;
+    padding: 22px;
+    color: #d9e4ef;
+    text-align: center;
+    background:
+      linear-gradient(180deg, rgba(255,255,255,.035), transparent),
+      repeating-linear-gradient(0deg, rgba(255,255,255,.025) 0 1px, transparent 1px 34px),
+      repeating-linear-gradient(90deg, rgba(255,255,255,.020) 0 1px, transparent 1px 34px);
+  }
+
+  .public-seed-preview.has-preview::after {
+    background: linear-gradient(180deg, rgba(0,0,0,.03), transparent 52%, rgba(0,0,0,.22));
+  }
+
+  .public-seed-preview-placeholder strong {
+    color: #f8fafc;
+    font-size: 15px;
+    line-height: 1;
+  }
+
+  .public-seed-preview-placeholder span {
+    max-width: 260px;
+    color: #96a2b5;
+    font-size: 11px;
+    font-weight: 800;
+  }
+
+  .public-seed-rank,
+  .public-seed-likes,
+  .public-seed-spawn-pin {
+    position: absolute;
+    z-index: 1;
+  }
+
+  .public-seed-rank {
+    top: 12px;
+    left: 12px;
+    padding: 5px 9px;
+    color: #eaffdf;
+    background: rgba(20,31,39,.78);
+    border-color: rgba(140,255,99,.28);
+    backdrop-filter: blur(8px);
+  }
+
+  .is-top-seed .public-seed-rank {
+    color: #0d180c;
+    background: linear-gradient(180deg, #baff8f, #68e24d);
+    border-color: rgba(190,255,160,.58);
+  }
+
+  .public-seed-likes {
+    top: 12px;
+    right: 12px;
+    min-height: 32px;
+    border-radius: 8px;
+    backdrop-filter: blur(8px);
+  }
+
+  .public-seed-spawn-pin {
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 38px;
+    height: 38px;
+    display: grid;
+    place-items: center;
+    border-radius: 10px;
+    background: rgba(13, 18, 28, .62);
+    border: 1px solid rgba(223, 206, 155, .58);
+    box-shadow: 0 12px 28px rgba(0,0,0,.36), 0 0 0 5px rgba(223,206,155,.10);
+    backdrop-filter: blur(6px);
+  }
+
+  .public-seed-spawn-pin img,
+  .public-seed-spawn-pin svg {
+    width: 28px;
+    height: 28px;
+    display: block;
+  }
+
+  .public-seed-footer {
+    grid-column: 1;
+    grid-row: 2;
+    min-width: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 38px;
+    align-items: center;
+    gap: 10px;
+    min-height: 40px;
+    padding: 0 12px;
+    background: #1c1c22;
+    border-top: 1px solid rgba(255,255,255,.08);
+  }
+
+  .public-seed-footer .public-copy {
+    width: 32px;
+    height: 32px;
+    justify-self: end;
+    color: #f6f6fb;
+    background: transparent;
+    border-left: 1px solid rgba(255,255,255,.16);
+    border-radius: 0;
+  }
+
+  .public-seed-value {
+    padding: 0;
+    color: #fff;
+    font: 950 16px/1.1 "Cascadia Mono", Consolas, monospace;
+  }
+
+  .public-seed-sub,
+  .public-seed-meta,
+  .public-seed-nearby,
+  .public-seed-actions {
+    grid-column: 1;
+    padding-left: 12px;
+    padding-right: 12px;
+    background: #1c1c22;
+  }
+
+  .public-seed-sub {
+    grid-row: 3;
+    padding-top: 10px;
+    color: #c8d3ff;
+  }
+
+  .public-seed-meta {
+    grid-row: 4;
+    padding-top: 10px;
+  }
+
+  .public-seed-nearby {
+    grid-row: 5;
+    max-height: none;
+    padding-top: 8px;
+    padding-bottom: 12px;
+  }
+
+  .public-seed-actions {
+    grid-row: 6;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    padding-bottom: 12px;
+  }
+
+  .public-seed-actions .mini-link {
+    height: 34px;
+    border-radius: 8px;
+  }
+
+  @media (max-width: 760px) {
+    .public-seeds-list {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 16px;
+    }
+
+    .public-seed-card {
+      grid-template-rows: 210px auto auto auto auto;
+    }
+  }
+
   /* Deploy layout: community cards render under the seed map calculator, not as a viewport overlay. */
   :root {
     --seed-map-calculator-h: 760px;

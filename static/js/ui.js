@@ -43,10 +43,12 @@ const FAVORITE_SEEDS_STORAGE_KEY = "seedmap.favoriteSeeds.v1";
 const PENDING_LIKED_SEED_STORAGE_KEY = "seedmap.pendingLikedSeed.v1";
 const PUBLIC_SEED_LIKES_STORAGE_KEY = "seedmap.publicSeedLikes.v1";
 const LOCAL_SEED_USER_STORAGE_KEY = "seedmap.localUserId.v1";
+const DAILY_SEED_SAVES_STORAGE_KEY = "seedmap.dailySeedSaves.v1";
 const SEED_VAULT_TOKEN_STORAGE_KEY = "seedVaultToken";
 const LEGACY_SEED_VAULT_TOKEN_STORAGE_KEY = "seedmap.seedVaultToken.v1";
 const FAVORITE_SEEDS_LIMIT = 80;
 const PUBLIC_SEEDS_LIMIT = 12;
+const DAILY_SEED_SAVE_LIMIT = 10;
 const SEED_API_BASE = String(window.SEED_VIEWER_SEED_API_BASE || API || "").replace(/\/$/, "");
 const SEED_API_MODE = String(window.SEED_VIEWER_SEED_API_MODE || "").toLowerCase();
 const SEED_AUTH_URL = String(window.SEED_VIEWER_AUTH_URL || "").trim();
@@ -56,6 +58,7 @@ let seedAuthMode = "login";
 let pendingSeedVaultAuth = null;
 let frameHeightRaf = 0;
 let frameResizeObserver = null;
+const publicSeedPreviewJobs = new Map();
 
 function appFrameHeight() {
   const doc = document.documentElement;
@@ -172,6 +175,53 @@ function currentSeedUser() {
   };
 }
 
+function todayKey() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function readDailySeedSaves() {
+  try {
+    const value = JSON.parse(localStorage.getItem(DAILY_SEED_SAVES_STORAGE_KEY) || "null");
+    if (!value || value.date !== todayKey() || !Array.isArray(value.keys)) {
+      return { date: todayKey(), keys: [] };
+    }
+    return { date: value.date, keys: [...new Set(value.keys.map(String).filter(Boolean))] };
+  } catch {
+    return { date: todayKey(), keys: [] };
+  }
+}
+
+function writeDailySeedSaves(value) {
+  try {
+    localStorage.setItem(DAILY_SEED_SAVES_STORAGE_KEY, JSON.stringify(value));
+  } catch {
+    // The backend still enforces the production limit.
+  }
+}
+
+function dailySeedSaveLimitReached(item) {
+  const key = item?.key || "";
+  if (!key || favoriteSeedIndex(key) >= 0) return false;
+  const value = readDailySeedSaves();
+  return !value.keys.includes(key) && value.keys.length >= DAILY_SEED_SAVE_LIMIT;
+}
+
+function rememberDailySeedSave(item) {
+  const key = item?.key || "";
+  if (!key) return;
+  const value = readDailySeedSaves();
+  if (!value.keys.includes(key)) value.keys.push(key);
+  writeDailySeedSaves({ date: value.date, keys: value.keys.slice(-DAILY_SEED_SAVE_LIMIT) });
+}
+
+function dailySeedSaveCount() {
+  return readDailySeedSaves().keys.length;
+}
+
+function seedSavedMessage(base = "Seed saved") {
+  return `${base} (${Math.min(dailySeedSaveCount(), DAILY_SEED_SAVE_LIMIT)}/${DAILY_SEED_SAVE_LIMIT} today)`;
+}
+
 function seedVaultToken() {
   const token = window.SEED_VIEWER_SEED_VAULT_TOKEN || window.SEED_VAULT_TOKEN || "";
   if (token) return String(token);
@@ -224,7 +274,10 @@ function sanitizeFavorite(item) {
     dimensionLabel: item.dimensionLabel || dimensionText(dimension),
     centerX: Number.isFinite(Number(item.centerX)) ? Math.round(Number(item.centerX)) : 0,
     centerZ: Number.isFinite(Number(item.centerZ)) ? Math.round(Number(item.centerZ)) : 0,
+    spawnX: Number.isFinite(Number(item.spawnX ?? item.spawn_x)) ? Math.round(Number(item.spawnX ?? item.spawn_x)) : 0,
+    spawnZ: Number.isFinite(Number(item.spawnZ ?? item.spawn_z)) ? Math.round(Number(item.spawnZ ?? item.spawn_z)) : 0,
     zoom: Number.isFinite(Number(item.zoom)) ? Number(item.zoom) : DEFAULT_ZOOM,
+    previewUrl: String(item.previewUrl || item.preview_url || ""),
     savedAt: item.savedAt || item.created_at || new Date().toISOString(),
     lastLoadedAt: item.lastLoadedAt || item.updated_at || "",
     loadCount: Math.max(0, Number(item.loadCount) || 0),
@@ -294,7 +347,14 @@ function seedApiResponseList(data) {
   return Array.isArray(data?.data) ? data.data : Array.isArray(data?.seeds) ? data.seeds : Array.isArray(data) ? data : [];
 }
 
+function apiPreviewUrl(value) {
+  const url = String(value || "").trim();
+  if (!url || url.startsWith("data:") || url.startsWith("blob:")) return "";
+  return url.slice(0, 2000);
+}
+
 function seedVaultPayload(item) {
+  const previewUrl = apiPreviewUrl(item.previewUrl);
   return {
     title: item.title || `Seed ${item.seed}`,
     seed: item.seed,
@@ -302,6 +362,9 @@ function seedVaultPayload(item) {
     dimension: apiDimension(item.dimension),
     centerX: Math.round(Number(item.centerX) || 0),
     centerZ: Math.round(Number(item.centerZ) || 0),
+    spawnX: Math.round(Number(item.spawnX) || 0),
+    spawnZ: Math.round(Number(item.spawnZ) || 0),
+    ...(previewUrl ? { preview_url: previewUrl } : {}),
     nearby_locations: Array.isArray(item.nearby) ? item.nearby.slice(0, 4).map(location => ({
       label: location.label || "Location",
       x: Math.round(Number(location.x) || 0),
@@ -448,11 +511,15 @@ function upsertFavoriteSeed(item) {
   if (!clean) return null;
   const index = favoriteSeedIndex(clean.key);
   if (index >= 0) {
+    const previous = state.favoriteSeeds[index];
     state.favoriteSeeds[index] = {
-      ...state.favoriteSeeds[index],
+      ...previous,
       ...clean,
-      savedAt: state.favoriteSeeds[index].savedAt || clean.savedAt,
-      likes: Number.isFinite(Number(clean.likes)) ? Number(clean.likes) : state.favoriteSeeds[index].likes
+      id: clean.id || previous.id,
+      user: clean.user || previous.user,
+      previewUrl: clean.previewUrl || previous.previewUrl,
+      savedAt: previous.savedAt || clean.savedAt,
+      likes: Number.isFinite(Number(clean.likes)) ? Number(clean.likes) : previous.likes
     };
   } else {
     state.favoriteSeeds.unshift(clean);
@@ -487,6 +554,22 @@ async function saveFavoriteSeedToApi(item) {
     body: JSON.stringify(item)
   });
   return sanitizeFavorite(seedApiResponseItem(data));
+}
+
+async function deleteFavoriteSeedFromApi(item) {
+  const clean = sanitizeFavorite(item);
+  if (!clean) return;
+  if (SEED_VAULT_ENABLED) {
+    if (!clean.id) return;
+    await seedApiRequest(seedVaultPath(`/api/v2/seed-vault/seeds/${encodeURIComponent(clean.id)}`), {
+      method: "DELETE"
+    });
+    return;
+  }
+  await seedApiRequest("/api/seeds/delete", {
+    method: "POST",
+    body: JSON.stringify(clean)
+  });
 }
 
 function readPublicSeedLikes() {
@@ -652,11 +735,179 @@ function updateFavoriteButtons() {
   }
 }
 
+function captureSpawnPreview(spawn) {
+  if (!state.loaded || !spawn || !canvas.width || !canvas.height || typeof render !== "function") return "";
+  const previous = {
+    viewX: state.viewX,
+    viewZ: state.viewZ,
+    zoom: state.zoom,
+    zoomTarget: state.zoomTarget,
+    selected: state.selected
+  };
+  try {
+    state.viewX = Math.round(spawn.x);
+    state.viewZ = Math.round(spawn.z);
+    state.zoom = clampMapZoom(DEFAULT_ZOOM);
+    state.zoomTarget = state.zoom;
+    render();
+
+    const out = document.createElement("canvas");
+    out.width = 640;
+    out.height = 360;
+    const outCtx = out.getContext("2d", { alpha: false });
+    outCtx.imageSmoothingEnabled = false;
+
+    const aspect = out.width / out.height;
+    let sw = canvas.width;
+    let sh = Math.round(sw / aspect);
+    if (sh > canvas.height) {
+      sh = canvas.height;
+      sw = Math.round(sh * aspect);
+    }
+    const sx = Math.max(0, Math.round((canvas.width - sw) / 2));
+    const sy = Math.max(0, Math.round((canvas.height - sh) / 2));
+    outCtx.drawImage(canvas, sx, sy, sw, sh, 0, 0, out.width, out.height);
+    return out.toDataURL("image/jpeg", .78);
+  } catch (err) {
+    console.warn("Could not capture spawn preview", err);
+    return "";
+  } finally {
+    state.viewX = previous.viewX;
+    state.viewZ = previous.viewZ;
+    state.zoom = previous.zoom;
+    state.zoomTarget = previous.zoomTarget;
+    state.selected = previous.selected;
+    render();
+  }
+}
+
+function wait(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function previewTileStats() {
+  if (!state.loaded || !dimensionCaps().biomes || !state.showBiomes) return { ready: true, loaded: 0, target: 0 };
+  const lod = pickLod();
+  const range = biomeTileRange(lod);
+  const cfg = LODS[lod];
+  let loaded = 0;
+  for (let tz = range.tzMin; tz <= range.tzMax; tz += 1) {
+    for (let tx = range.txMin; tx <= range.txMax; tx += 1) {
+      if (state.tiles.has(tileKey(lod, tx, tz))) loaded += 1;
+    }
+  }
+  const centerKey = tileKey(
+    lod,
+    Math.floor(state.viewX / cfg.blocks),
+    Math.floor(state.viewZ / cfg.blocks)
+  );
+  const target = Math.min(range.count, Math.max(6, Math.ceil(range.count * .18)));
+  return {
+    ready: state.tiles.has(centerKey) && loaded >= target,
+    loaded,
+    target
+  };
+}
+
+async function captureRealSpawnPreview(spawn) {
+  if (!state.loaded || !spawn) return "";
+  const previous = {
+    viewX: state.viewX,
+    viewZ: state.viewZ,
+    zoom: state.zoom,
+    zoomTarget: state.zoomTarget,
+    selected: state.selected
+  };
+  try {
+    state.viewX = Math.round(spawn.x);
+    state.viewZ = Math.round(spawn.z);
+    state.zoom = clampMapZoom(DEFAULT_ZOOM);
+    state.zoomTarget = state.zoom;
+    for (let i = 0; i < 18; i += 1) {
+      render();
+      pumpTiles();
+      const stats = previewTileStats();
+      if (stats.ready) break;
+      await wait(i < 4 ? 80 : 140);
+    }
+    render();
+    return captureSpawnPreview(spawn);
+  } finally {
+    state.viewX = previous.viewX;
+    state.viewZ = previous.viewZ;
+    state.zoom = previous.zoom;
+    state.zoomTarget = previous.zoomTarget;
+    state.selected = previous.selected;
+    render();
+  }
+}
+
+function shadedPreviewRgb(rgb, x, z, biomeId) {
+  const noise = seededNoise((Number(biomeId) || 1) * 2654435761, x, z);
+  const shade = .88 + noise * .18;
+  return [
+    clamp(Math.round(rgb[0] * shade), 0, 255),
+    clamp(Math.round(rgb[1] * shade), 0, 255),
+    clamp(Math.round(rgb[2] * shade), 0, 255)
+  ];
+}
+
+async function createSpawnBiomePreview(item, spawn) {
+  if (!item?.seed || !spawn || !dimensionCaps(item.dimension).biomes) return "";
+  const samplesW = 192;
+  const samplesH = 108;
+  const sampleScale = 16;
+  try {
+    const data = await workerRequest("biomeTile", {
+      seed: item.seed,
+      version: item.version,
+      dimension: item.dimension || "overworld",
+      x: Math.round(spawn.x - (samplesW * sampleScale) / 2),
+      z: Math.round(spawn.z - (samplesH * sampleScale) / 2),
+      w: samplesW,
+      h: samplesH,
+      scale: sampleScale
+    });
+    if (!data?.grid?.length) return "";
+    const out = document.createElement("canvas");
+    out.width = 768;
+    out.height = 432;
+    const outCtx = out.getContext("2d", { alpha: false });
+    const img = outCtx.createImageData(samplesW, samplesH);
+    const pixels = img.data;
+    for (let z = 0; z < samplesH; z += 1) {
+      for (let x = 0; x < samplesW; x += 1) {
+        const i = z * samplesW + x;
+        const biomeId = Number(data.grid[i]);
+        const rgb = shadedPreviewRgb(BIOME_RGB.get(biomeId) || UNKNOWN_BIOME_RGB, x, z, biomeId);
+        const p = i * 4;
+        pixels[p] = rgb[0];
+        pixels[p + 1] = rgb[1];
+        pixels[p + 2] = rgb[2];
+        pixels[p + 3] = 255;
+      }
+    }
+    const src = document.createElement("canvas");
+    src.width = samplesW;
+    src.height = samplesH;
+    src.getContext("2d", { alpha: false }).putImageData(img, 0, 0);
+    outCtx.imageSmoothingEnabled = false;
+    outCtx.drawImage(src, 0, 0, out.width, out.height);
+    outCtx.fillStyle = "rgba(0,0,0,.06)";
+    outCtx.fillRect(0, 0, out.width, out.height);
+    return out.toDataURL("image/jpeg", .84);
+  } catch (err) {
+    console.warn("Could not render spawn biome preview", err);
+    return "";
+  }
+}
+
 function currentFavoritePayload() {
   const seed = normalizeFavoriteSeed(els.seedInput.value || state.seed);
   const version = els.version.value;
   const dimension = els.dimension.value || "overworld";
   const matchesLoadedWorld = state.loaded && state.seed === seed && state.version === version && state.dimension === dimension;
+  const spawn = matchesLoadedWorld && state.structures?.spawn ? state.structures.spawn : null;
   const now = new Date().toISOString();
   const user = currentSeedUser();
   return sanitizeFavorite({
@@ -667,6 +918,8 @@ function currentFavoritePayload() {
     dimensionLabel: dimensionText(dimension),
     centerX: matchesLoadedWorld ? state.viewX : 0,
     centerZ: matchesLoadedWorld ? state.viewZ : 0,
+    spawnX: spawn ? spawn.x : 0,
+    spawnZ: spawn ? spawn.z : 0,
     zoom: matchesLoadedWorld ? state.zoom : DEFAULT_ZOOM,
     savedAt: now,
     lastLoadedAt: matchesLoadedWorld ? now : "",
@@ -683,31 +936,75 @@ async function addFavoriteSeed(item, options = {}) {
     showToast("Enter a seed first");
     return;
   }
+  let cleanItem = sanitizeFavorite(item);
+  if (!cleanItem) return;
   if (SEED_VAULT_ENABLED && !options.skipAuth && !seedVaultToken()) {
-    requireSeedVaultAuth(item, "save");
+    requireSeedVaultAuth(cleanItem, "save");
     return;
   }
   if (!SEED_VAULT_ENABLED && !options.skipAuth && SEED_AUTH_URL && !seedAuthWasCompleted()) {
-    startSeedAuthFlow(item);
+    startSeedAuthFlow(cleanItem);
     return;
   }
+  if (!options.skipDailyLimit && dailySeedSaveLimitReached(cleanItem)) {
+    showToast(`Daily limit reached: ${DAILY_SEED_SAVE_LIMIT} seeds`);
+    return;
+  }
+  const sameLoadedSeed = state.loaded
+    && state.seed === cleanItem.seed
+    && state.version === cleanItem.version
+    && state.dimension === cleanItem.dimension;
+  const previewSpawn = !cleanItem.previewUrl && sameLoadedSeed && state.structures?.spawn
+    ? { x: state.structures.spawn.x, z: state.structures.spawn.z }
+    : null;
 
-  const saved = upsertFavoriteSeed(item);
+  const saved = upsertFavoriteSeed(cleanItem);
   writeFavoriteSeeds();
   renderFavoriteSeeds();
   renderPublicSeedCards();
   updateFavoriteButtons();
   showToast(options.fromAuth ? "Seed saved after registration" : "Seed saved");
 
+  if (previewSpawn) {
+    createSpawnBiomePreview(saved, previewSpawn).then(previewUrl => {
+      if (!previewUrl) return;
+      const latest = state.favoriteSeeds.find(seed => sameSeedItem(seed, saved)) || saved;
+      const withPreview = sanitizeFavorite({ ...latest, previewUrl });
+      if (!withPreview) return;
+      upsertFavoriteSeed(withPreview);
+      rememberGeneratedPublicPreview(withPreview);
+      writeFavoriteSeeds();
+      renderFavoriteSeeds();
+      renderPublicSeedCards();
+      updateFavoriteButtons();
+      queueFrameHeightPost();
+    }).catch(err => {
+      console.warn("Could not attach seed preview", err);
+    });
+  }
+
   try {
     const apiItem = await saveFavoriteSeedToApi(saved);
     if (apiItem) upsertFavoriteSeed(apiItem);
+    rememberDailySeedSave(apiItem || saved);
     writeFavoriteSeeds();
     renderFavoriteSeeds();
     updateFavoriteButtons();
+    showToast(seedSavedMessage(options.fromAuth ? "Seed saved after registration" : "Seed saved"));
     await loadPublicSeedCards();
   } catch (err) {
     console.warn("Seed API save unavailable; using local favorites", err);
+    if (err?.status === 429) {
+      state.favoriteSeeds = state.favoriteSeeds.filter(seed => !sameSeedItem(seed, saved));
+      writeFavoriteSeeds();
+      renderFavoriteSeeds();
+      renderPublicSeedCards();
+      updateFavoriteButtons();
+      showToast(`Daily limit reached: ${DAILY_SEED_SAVE_LIMIT} seeds`);
+    } else {
+      rememberDailySeedSave(saved);
+      showToast(seedSavedMessage("Seed saved locally"));
+    }
   }
 }
 
@@ -719,12 +1016,7 @@ async function toggleCurrentFavorite() {
   }
   const index = favoriteSeedIndex(item.key);
   if (index >= 0) {
-    state.favoriteSeeds.splice(index, 1);
-    showToast("Removed from favorites");
-    writeFavoriteSeeds();
-    renderFavoriteSeeds();
-    renderPublicSeedCards();
-    updateFavoriteButtons();
+    await removeFavoriteSeed(item.key);
   } else {
     await addFavoriteSeed(item);
   }
@@ -775,14 +1067,23 @@ function loadFavoriteSeed(item) {
   showToast("Favorite seed loaded");
 }
 
-function removeFavoriteSeed(key) {
+async function removeFavoriteSeed(key) {
   const index = favoriteSeedIndex(key);
   if (index < 0) return;
+  const removed = state.favoriteSeeds[index];
   state.favoriteSeeds.splice(index, 1);
+  state.publicSeeds = state.publicSeeds.filter(seed => !sameSeedItem(seed, removed));
   writeFavoriteSeeds();
   renderFavoriteSeeds();
+  renderPublicSeedCards();
   updateFavoriteButtons();
   showToast("Favorite removed");
+  try {
+    await deleteFavoriteSeedFromApi(removed);
+    await loadPublicSeedCards();
+  } catch (err) {
+    console.warn("Seed API delete unavailable; removed locally", err);
+  }
 }
 
 function renderFavoriteSeeds() {
@@ -836,6 +1137,211 @@ function isTopSeed(item, items) {
   return maxLikes > 1 && (Number(item.likes) || 0) === maxLikes;
 }
 
+function hashString(value) {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function seededPercent(hash, shift, min, max) {
+  return min + (((hash >>> shift) & 255) / 255) * (max - min);
+}
+
+function cssUrl(value) {
+  return String(value || "").replace(/["\\\n\r]/g, "");
+}
+
+function seededNoise(seed, x, z) {
+  let n = seed ^ Math.imul(x + 101, 374761393) ^ Math.imul(z + 37, 668265263);
+  n = Math.imul(n ^ (n >>> 13), 1274126177);
+  return ((n ^ (n >>> 16)) >>> 0) / 4294967295;
+}
+
+function previewPalette(dimension) {
+  if (dimension === "nether") {
+    return {
+      water: "#351017",
+      waterEdge: "#52151d",
+      low: "#5f241d",
+      mid: "#7a2d1e",
+      high: "#9b3b20",
+      snow: "#d85f2e",
+      forest: "#2a1517",
+      shore: "#ba6f3b",
+      grid: "rgba(24,10,12,.28)"
+    };
+  }
+  if (dimension === "end") {
+    return {
+      water: "#10101b",
+      waterEdge: "#1b1930",
+      low: "#817f52",
+      mid: "#b4b06e",
+      high: "#d7d28a",
+      snow: "#ece7aa",
+      forest: "#343125",
+      shore: "#cbc681",
+      grid: "rgba(30,28,42,.30)"
+    };
+  }
+  return {
+    water: "#091e9c",
+    waterEdge: "#173bbb",
+    low: "#7faa54",
+    grass: "#8bb45b",
+    mid: "#5f963f",
+    high: "#3f7f3f",
+    hill: "#6b7d57",
+    stone: "#858d85",
+    snow: "#e8eef0",
+    forest: "#21633b",
+    forest2: "#0f6f35",
+    shore: "#f3dc64",
+    grid: "rgba(8,28,18,.22)"
+  };
+}
+
+function minecraftPreviewSvg(item) {
+  const seed = hashString(`${item.seed}|${item.version}|${item.dimension}`);
+  const palette = previewPalette(item.dimension);
+  const cols = 32;
+  const rows = 14;
+  const cell = 16;
+  const waterBand = seededPercent(seed, 0, 4, 19);
+  const lakeX = seededPercent(seed, 8, 10, 28);
+  const lakeY = seededPercent(seed, 16, 2, 11);
+  const lakeR = seededPercent(seed, 24, 2.4, 4.8);
+  const riverOffset = seededPercent(seed, 5, 7, 25);
+  const snowCenterX = seededPercent(seed, 13, 8, 27);
+  const snowCenterY = seededPercent(seed, 21, 1, 9);
+  const parts = [`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${cols * cell} ${rows * cell}" shape-rendering="crispEdges">`];
+  parts.push(`<rect width="100%" height="100%" fill="${palette.mid}"/>`);
+  for (let z = 0; z < rows; z += 1) {
+    for (let x = 0; x < cols; x += 1) {
+      const n = seededNoise(seed, x, z);
+      const n2 = seededNoise(seed ^ 0x9e3779b9, Math.floor(x / 2), Math.floor(z / 2));
+      const n3 = seededNoise(seed ^ 0x85ebca6b, x + 11, z + 7);
+      const coastLine = waterBand + Math.sin((z + seed % 11) * 0.75) * 2.2 + Math.sin(z * 1.7) * 0.8;
+      const riverLine = riverOffset + Math.sin((z + seed % 13) * 0.72) * 3.6;
+      const river = Math.abs(x - riverLine) < (n3 > 0.64 ? 1.25 : 0.85);
+      const coast = x < coastLine;
+      const lake = Math.hypot((x - lakeX) / 1.45, z - lakeY) < lakeR + (n2 - .5);
+      const nearWater = Math.abs(x - coastLine) < 1.5 || Math.abs(x - riverLine) < 1.7 || Math.abs(Math.hypot((x - lakeX) / 1.45, z - lakeY) - lakeR) < 1.2;
+      const mountain = Math.hypot((x - snowCenterX) / 1.3, z - snowCenterY) < 4.4 && n2 > 0.18;
+      let color = n < 0.24 ? palette.low : n < 0.52 ? palette.grass || palette.mid : palette.mid;
+      if (coast || river || lake) color = n > 0.18 ? palette.water : palette.waterEdge;
+      else if (nearWater && n > 0.25) color = palette.shore;
+      else if (mountain && n > 0.68) color = palette.snow;
+      else if (mountain && n > 0.38) color = palette.stone || palette.high;
+      else if (n2 > 0.74) color = palette.forest;
+      else if (n3 > 0.86) color = palette.forest2 || palette.high;
+      else if (n > 0.82) color = palette.high;
+      parts.push(`<rect x="${x * cell}" y="${z * cell}" width="${cell}" height="${cell}" fill="${color}"/>`);
+      if (!(coast || river || lake) && n3 > 0.90) {
+        parts.push(`<rect x="${x * cell + 5}" y="${z * cell + 5}" width="6" height="6" fill="${palette.high}" opacity=".78"/>`);
+      }
+    }
+  }
+  parts.push(`<path d="M0 0H${cols * cell}V${rows * cell}H0Z" fill="none" stroke="${palette.grid}" stroke-width="1"/>`);
+  parts.push(`</svg>`);
+  return `data:image/svg+xml,${encodeURIComponent(parts.join(""))}`;
+}
+
+function spawnPreviewStyle(item) {
+  const url = cssUrl(item.previewUrl);
+  return url ? `background-image:linear-gradient(180deg, rgba(0,0,0,.04), rgba(0,0,0,.18)),url('${url}');` : "";
+}
+
+function minecraftPreviewCells(item) {
+  if (item.previewUrl) return "";
+  const seed = hashString(`${item.seed}|${item.version}|${item.dimension}`);
+  const palette = previewPalette(item.dimension);
+  const cols = 32;
+  const rows = 14;
+  const waterBand = seededPercent(seed, 0, 4, 18);
+  const lakeX = seededPercent(seed, 8, 10, 28);
+  const lakeY = seededPercent(seed, 16, 2, 11);
+  const lakeR = seededPercent(seed, 24, 2.8, 5.2);
+  const lake2X = seededPercent(seed, 3, 5, 24);
+  const lake2Y = seededPercent(seed, 11, 2, 12);
+  const lake2R = seededPercent(seed, 19, 1.8, 3.4);
+  const riverOffset = seededPercent(seed, 5, 7, 25);
+  const snowCenterX = seededPercent(seed, 13, 8, 27);
+  const snowCenterY = seededPercent(seed, 21, 1, 9);
+  const cells = [];
+
+  for (let z = 0; z < rows; z += 1) {
+    for (let x = 0; x < cols; x += 1) {
+      const n = seededNoise(seed, x, z);
+      const n2 = seededNoise(seed ^ 0x9e3779b9, Math.floor(x / 2), Math.floor(z / 2));
+      const n3 = seededNoise(seed ^ 0x85ebca6b, x + 11, z + 7);
+      const coastLine = waterBand + Math.sin((z + seed % 11) * 0.75) * 2.4 + Math.sin(z * 1.7) * 0.9;
+      const riverLine = riverOffset + Math.sin((z + seed % 13) * 0.72) * 3.8;
+      const river = Math.abs(x - riverLine) < (n3 > 0.64 ? 1.35 : 0.95);
+      const coast = x < coastLine;
+      const lake = Math.hypot((x - lakeX) / 1.45, z - lakeY) < lakeR + (n2 - .5);
+      const lake2 = Math.hypot((x - lake2X) / 1.2, z - lake2Y) < lake2R + (n - .5);
+      const nearWater = Math.abs(x - coastLine) < 1.5
+        || Math.abs(x - riverLine) < 1.7
+        || Math.abs(Math.hypot((x - lakeX) / 1.45, z - lakeY) - lakeR) < 1.2
+        || Math.abs(Math.hypot((x - lake2X) / 1.2, z - lake2Y) - lake2R) < 1.1;
+      const mountain = Math.hypot((x - snowCenterX) / 1.3, z - snowCenterY) < 4.4 && n2 > 0.18;
+      let color = n < 0.24 ? palette.low : n < 0.52 ? palette.grass || palette.mid : palette.mid;
+      if (coast || river || lake || lake2) color = n > 0.18 ? palette.water : palette.waterEdge;
+      else if (nearWater && n > 0.25) color = palette.shore;
+      else if (mountain && n > 0.68) color = palette.snow;
+      else if (mountain && n > 0.38) color = palette.stone || palette.high;
+      else if (n2 > 0.74) color = palette.forest;
+      else if (n3 > 0.86) color = palette.forest2 || palette.high;
+      else if (n > 0.82) color = palette.high;
+      cells.push(`<span class="public-seed-map-cell" style="background:${color}"></span>`);
+    }
+  }
+
+  return `<div class="public-seed-map-grid" aria-hidden="true">${cells.join("")}</div>`;
+}
+
+function previewPlaceholder(item) {
+  if (item.previewUrl) return "";
+  return `<div class="public-seed-preview-placeholder"><strong>Generating preview</strong><span>Building a real spawn map preview</span></div>`;
+}
+
+function rememberGeneratedPublicPreview(item) {
+  if (!item?.previewUrl) return;
+  state.publicSeeds = state.publicSeeds.map(seed => sameSeedItem(seed, item) ? { ...seed, previewUrl: item.previewUrl } : seed);
+  const favoriteIndex = favoriteSeedIndex(item.key);
+  if (favoriteIndex >= 0) {
+    state.favoriteSeeds[favoriteIndex] = { ...state.favoriteSeeds[favoriteIndex], previewUrl: item.previewUrl };
+    writeFavoriteSeeds();
+  }
+}
+
+async function hydratePublicSeedPreview(item, card) {
+  if (!item || item.previewUrl || !card?.isConnected) return;
+  const jobKey = item.id || item.key;
+  if (publicSeedPreviewJobs.has(jobKey)) return;
+  const job = (async () => {
+    const spawn = {
+      x: Number.isFinite(Number(item.spawnX)) ? Number(item.spawnX) : Number(item.centerX) || 0,
+      z: Number.isFinite(Number(item.spawnZ)) ? Number(item.spawnZ) : Number(item.centerZ) || 0
+    };
+    const previewUrl = await createSpawnBiomePreview(item, spawn);
+    if (!previewUrl) return;
+    const updated = { ...item, previewUrl };
+    rememberGeneratedPublicPreview(updated);
+    const liveCard = card.isConnected ? card : els.publicSeedsList?.querySelector(`[data-seed-key="${CSS.escape(jobKey)}"]`);
+    const preview = liveCard?.querySelector(".public-seed-preview");
+    if (!preview) return;
+    preview.classList.add("has-preview");
+    preview.setAttribute("style", spawnPreviewStyle(updated));
+    preview.querySelector(".public-seed-preview-placeholder")?.remove();
+  })().finally(() => publicSeedPreviewJobs.delete(jobKey));
+  publicSeedPreviewJobs.set(jobKey, job);
+}
+
 function buildSeedCardShareUrl(item) {
   const url = new URL(window.location.href);
   url.search = "";
@@ -869,17 +1375,21 @@ function renderPublicSeedCards() {
     const userName = clean.user?.name || "Community";
     const card = document.createElement("article");
     card.className = `public-seed-card${topSeed ? " is-top-seed" : ""}${liked ? " is-liked" : ""}`;
+    card.dataset.seedKey = clean.id || clean.key;
     card.innerHTML = `
-      <div class="public-seed-top">
-        <div class="public-seed-main">
-          <span class="public-seed-rank">${topSeed ? "Top seed" : "Community pick"}</span>
-          <span class="public-seed-value">${escapeHtml(clean.seed)}</span>
-          <span class="public-seed-sub">${escapeHtml(clean.versionLabel || clean.version)} &middot; ${escapeHtml(clean.dimensionLabel || dimensionText(clean.dimension))} &middot; by ${escapeHtml(userName)}</span>
-        </div>
+      <div class="public-seed-preview${clean.previewUrl ? " has-preview" : ""}" style="${spawnPreviewStyle(clean)}">
+        ${previewPlaceholder(clean)}
+        <span class="public-seed-rank">${topSeed ? "Top seed" : "Featured"}</span>
         <button class="public-seed-likes" type="button" title="${liked ? "Unlike this seed" : "Like this seed"}" aria-pressed="${String(liked)}">${ICONS.heart}<span>${escapeHtml(publicSeedLikesText(clean))}</span></button>
+        <span class="public-seed-spawn-pin" title="Spawn point" aria-label="Spawn point">${iconMarkup("map", STRUCT_META.spawn.asset)}</span>
       </div>
+      <div class="public-seed-footer">
+        <span class="public-seed-value">${escapeHtml(clean.seed)}</span>
+        <button class="icon-only public-copy" type="button" title="Copy seed">${ICONS.copy}</button>
+      </div>
+      <div class="public-seed-sub">${escapeHtml(clean.versionLabel || clean.version)} &middot; ${escapeHtml(clean.dimensionLabel || dimensionText(clean.dimension))} &middot; by ${escapeHtml(userName)}</div>
       <div class="public-seed-meta">
-        <span>Center ${escapeHtml(clean.centerX)}, ${escapeHtml(clean.centerZ)}</span>
+        <span>Spawn ${escapeHtml(clean.spawnX)}, ${escapeHtml(clean.spawnZ)}</span>
         <span>Saved ${escapeHtml(compactDate(clean.savedAt))}</span>
       </div>
       <div class="public-seed-nearby">
@@ -889,7 +1399,6 @@ function renderPublicSeedCards() {
       </div>
       <div class="public-seed-actions">
         <button class="mini-link public-load" type="button">${ICONS.play}<span>Load</span></button>
-        <button class="mini-link public-copy" type="button">${ICONS.copy}<span>Copy</span></button>
         <button class="mini-link public-share" type="button">${ICONS.link}<span>Share</span></button>
       </div>
     `;
@@ -898,6 +1407,7 @@ function renderPublicSeedCards() {
     card.querySelector(".public-copy").addEventListener("click", () => copyText(clean.seed, "Seed copied"));
     card.querySelector(".public-share").addEventListener("click", () => copyText(buildSeedCardShareUrl(clean), "Seed link copied"));
     els.publicSeedsList.append(card);
+    hydratePublicSeedPreview(clean, card);
   }
   queueFrameHeightPost();
 }
