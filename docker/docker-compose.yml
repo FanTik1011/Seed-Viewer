@@ -10,7 +10,7 @@ services:
       PORT: "8080"
       PUBLIC_BASE_PATH: "/minecraft-tools/Seed-Viewer"
       SEED_API_MODE: "seed-vault"
-      SEED_API_BASE: "${SEED_API_BASE:-/api/v2/seed-vault}"
+      SEED_API_BASE: "${SEED_API_BASE:-https://panel.godlike.host}"
       SEED_MOCK_API_ENABLED: "${SEED_MOCK_API_ENABLED:-0}"
       WEB_CONCURRENCY: "1"
       GUNICORN_THREADS: "4"
