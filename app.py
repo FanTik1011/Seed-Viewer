@@ -30,6 +30,7 @@ def _normalise_base_path(value: str) -> str:
 PUBLIC_BASE_PATH = _normalise_base_path(os.environ.get("PUBLIC_BASE_PATH", ""))
 PUBLIC_PERF_MODE = os.environ.get("PUBLIC_PERF_MODE", "heroku" if os.environ.get("DYNO") else "").strip().lower()
 SEED_AUTH_URL = os.environ.get("SEED_AUTH_URL", "").strip()
+SEED_GOOGLE_AUTH_URL = os.environ.get("SEED_GOOGLE_AUTH_URL", "").strip()
 SEED_API_BASE = os.environ.get("SEED_API_BASE", "https://panel.godlike.host").strip().rstrip("/")
 SEED_API_MODE = os.environ.get("SEED_API_MODE", "seed-vault").strip().lower()
 SEED_MOCK_API_ENABLED = os.environ.get("SEED_MOCK_API_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
@@ -1119,6 +1120,7 @@ def index():
         cache_bust=_CACHE_BUST,
         perf_mode=PUBLIC_PERF_MODE,
         seed_auth_url=SEED_AUTH_URL,
+        seed_google_auth_url=SEED_GOOGLE_AUTH_URL,
         seed_api_base=SEED_API_BASE,
         seed_api_mode=SEED_API_MODE,
     )

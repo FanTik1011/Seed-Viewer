@@ -328,6 +328,11 @@
         <button class="mini-link is-active" id="seed-auth-login-tab" type="button">Login</button>
         <button class="mini-link" id="seed-auth-register-tab" type="button">Register</button>
       </div>
+      <button class="seed-google-auth" id="seed-google-auth" type="button">
+        <span class="seed-google-mark" aria-hidden="true">G</span>
+        <span>Continue with Google</span>
+      </button>
+      <div class="seed-auth-divider"><span>or</span></div>
       <label class="seed-auth-field seed-auth-name-row is-hidden">
         <span>Name</span>
         <input class="field" id="seed-auth-name" type="text" autocomplete="name" maxlength="255" placeholder="Player name">
@@ -354,6 +359,7 @@
 window.SEED_VIEWER_BASE_PATH = "{{ base_path }}";
 window.SEED_VIEWER_PERF_MODE = {{ perf_mode|tojson }};
 window.SEED_VIEWER_AUTH_URL = {{ seed_auth_url|tojson }};
+window.SEED_VIEWER_GOOGLE_AUTH_URL = {{ seed_google_auth_url|tojson }};
 window.SEED_VIEWER_SEED_API_BASE = {{ seed_api_base|tojson }};
 window.SEED_VIEWER_SEED_API_MODE = {{ seed_api_mode|tojson }};
 </script>
