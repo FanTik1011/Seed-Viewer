@@ -8062,19 +8062,25 @@
     }
   }
 
-  /* Right drawers should wrap their content instead of stretching to the bottom of the calculator. */
+  /* Right drawers mirror the left calculator panel instead of floating with page scroll. */
   @media (min-width: 761px) {
     .finder-drawer,
     .favorites-drawer {
-      bottom: auto !important;
+      position: absolute !important;
+      top: 14px !important;
+      right: 8px !important;
+      bottom: 8px !important;
+      width: var(--left-panel-width-final, 320px) !important;
+      max-width: calc(100% - 16px) !important;
       height: auto !important;
-      max-height: min(620px, calc(var(--seed-map-calculator-h) - 32px)) !important;
-      grid-template-rows: auto minmax(0, auto) auto !important;
+      max-height: none !important;
+      grid-template-rows: auto minmax(0, 1fr) auto !important;
     }
 
     .finder-scroll,
     .favorites-scroll {
-      max-height: min(500px, calc(var(--seed-map-calculator-h) - 150px)) !important;
+      min-height: 0 !important;
+      max-height: none !important;
       overflow-y: auto !important;
     }
   }
