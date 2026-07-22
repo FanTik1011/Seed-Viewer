@@ -8061,3 +8061,20 @@
       border-radius: 10px !important;
     }
   }
+
+  /* Right drawers should wrap their content instead of stretching to the bottom of the calculator. */
+  @media (min-width: 761px) {
+    .finder-drawer,
+    .favorites-drawer {
+      bottom: auto !important;
+      height: auto !important;
+      max-height: min(620px, calc(var(--seed-map-calculator-h) - 32px)) !important;
+      grid-template-rows: auto minmax(0, auto) auto !important;
+    }
+
+    .finder-scroll,
+    .favorites-scroll {
+      max-height: min(500px, calc(var(--seed-map-calculator-h) - 150px)) !important;
+      overflow-y: auto !important;
+    }
+  }
