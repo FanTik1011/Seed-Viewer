@@ -245,6 +245,15 @@ function writeSeedVaultToken(token) {
   return true;
 }
 
+function clearSeedVaultToken() {
+  try {
+    localStorage.removeItem(SEED_VAULT_TOKEN_STORAGE_KEY);
+    localStorage.removeItem(LEGACY_SEED_VAULT_TOKEN_STORAGE_KEY);
+  } catch {
+    // If storage is unavailable, the next request will still fail and show auth again.
+  }
+}
+
 function sanitizeFavorite(item) {
   const seed = normalizeFavoriteSeed(item?.seed);
   if (!seed) return null;
@@ -994,13 +1003,21 @@ async function addFavoriteSeed(item, options = {}) {
     await loadPublicSeedCards();
   } catch (err) {
     console.warn("Seed API save unavailable; using local favorites", err);
-    if (err?.status === 429) {
+    if (SEED_VAULT_ENABLED) {
       state.favoriteSeeds = state.favoriteSeeds.filter(seed => !sameSeedItem(seed, saved));
       writeFavoriteSeeds();
       renderFavoriteSeeds();
       renderPublicSeedCards();
       updateFavoriteButtons();
-      showToast(`Daily limit reached: ${DAILY_SEED_SAVE_LIMIT} seeds`);
+      if (err?.status === 429) {
+        showToast(`Daily limit reached: ${DAILY_SEED_SAVE_LIMIT} seeds`);
+      } else if ([400, 401, 403].includes(Number(err?.status))) {
+        clearSeedVaultToken();
+        requestSeedVaultAuth(cleanItem, "save");
+        showToast("Please log in again");
+      } else {
+        showToast("SeedVault save failed");
+      }
     } else {
       rememberDailySeedSave(saved);
       showToast(seedSavedMessage("Seed saved locally"));
@@ -1118,6 +1135,7 @@ function renderFavoriteSeeds() {
 }
 
 function publicSeedSource() {
+  if (SEED_VAULT_ENABLED) return state.publicSeeds.slice(0, PUBLIC_SEEDS_LIMIT);
   if (state.publicSeeds.length) return state.publicSeeds.slice(0, PUBLIC_SEEDS_LIMIT);
   return state.favoriteSeeds.slice(0, PUBLIC_SEEDS_LIMIT).map(item => ({ ...item, localOnly: true }));
 }
