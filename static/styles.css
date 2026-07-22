@@ -5559,58 +5559,6 @@
     box-shadow: 0 10px 22px rgba(101,221,73,.18);
   }
 
-  .seed-google-auth {
-    height: 42px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    border-radius: 8px;
-    color: #f7fbff;
-    background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.035));
-    border: 1px solid rgba(235,246,240,.16);
-    font-family: inherit;
-    font-size: 12px;
-    font-weight: 950;
-    cursor: pointer;
-    box-shadow: inset 0 1px rgba(255,255,255,.07);
-  }
-
-  .seed-google-auth:hover {
-    color: #081208;
-    background: linear-gradient(180deg, #f9fbff, #e7ecf5);
-    border-color: rgba(255,255,255,.42);
-  }
-
-  .seed-google-mark {
-    width: 22px;
-    height: 22px;
-    display: grid;
-    place-items: center;
-    border-radius: 50%;
-    color: #1a73e8;
-    background: #fff;
-    font: 950 14px/1 Inter, ui-sans-serif, system-ui, sans-serif;
-  }
-
-  .seed-auth-divider {
-    display: grid;
-    grid-template-columns: 1fr auto 1fr;
-    align-items: center;
-    gap: 10px;
-    color: #78859d;
-    font-size: 10px;
-    font-weight: 900;
-    text-transform: uppercase;
-  }
-
-  .seed-auth-divider::before,
-  .seed-auth-divider::after {
-    content: "";
-    height: 1px;
-    background: rgba(148,166,214,.16);
-  }
-
   .seed-auth-field {
     display: grid;
     gap: 6px;

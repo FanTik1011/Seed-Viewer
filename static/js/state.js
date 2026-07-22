@@ -77,7 +77,6 @@ const els = {
   seedAuthClose: document.getElementById("seed-auth-close"),
   seedAuthLoginTab: document.getElementById("seed-auth-login-tab"),
   seedAuthRegisterTab: document.getElementById("seed-auth-register-tab"),
-  seedGoogleAuth: document.getElementById("seed-google-auth"),
   seedAuthNameRow: document.querySelector(".seed-auth-name-row"),
   seedAuthConfirmRow: document.querySelector(".seed-auth-confirm-row"),
   seedAuthName: document.getElementById("seed-auth-name"),

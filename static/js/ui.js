@@ -52,9 +52,7 @@ const DAILY_SEED_SAVE_LIMIT = 10;
 const SEED_API_BASE = String(window.SEED_VIEWER_SEED_API_BASE || API || "").replace(/\/$/, "");
 const SEED_API_MODE = String(window.SEED_VIEWER_SEED_API_MODE || "").toLowerCase();
 const SEED_AUTH_URL = String(window.SEED_VIEWER_AUTH_URL || "").trim();
-const SEED_GOOGLE_AUTH_URL = String(window.SEED_VIEWER_GOOGLE_AUTH_URL || "").trim();
 const SEED_AUTH_COMPLETE_PARAM = "seedAuthComplete";
-const SEED_GOOGLE_AUTH_PARAM = "seedGoogleAuth";
 const SEED_VAULT_ENABLED = SEED_API_MODE === "seed-vault" || /(?:panel\.godlike|seed-vault|\/api\/v2)/i.test(SEED_API_BASE);
 let seedAuthMode = "login";
 let pendingSeedVaultAuth = null;
@@ -487,48 +485,15 @@ function authReturnUrl() {
   return url.toString();
 }
 
-function googleAuthReturnUrl() {
-  const url = new URL(window.location.href);
-  url.searchParams.set(SEED_AUTH_COMPLETE_PARAM, "1");
-  url.searchParams.set(SEED_GOOGLE_AUTH_PARAM, "1");
-  return url.toString();
-}
-
 function seedAuthWasCompleted() {
   return new URLSearchParams(window.location.search).get(SEED_AUTH_COMPLETE_PARAM) === "1";
 }
 
 function clearSeedAuthReturnParam() {
   const url = new URL(window.location.href);
-  const hashParams = new URLSearchParams(url.hash.startsWith("#") ? url.hash.slice(1) : "");
-  const hadAuthParams = url.searchParams.has(SEED_AUTH_COMPLETE_PARAM)
-    || url.searchParams.has(SEED_GOOGLE_AUTH_PARAM)
-    || url.searchParams.has(SEED_VAULT_TOKEN_STORAGE_KEY)
-    || url.searchParams.has("token")
-    || url.searchParams.has("access_token")
-    || hashParams.has(SEED_VAULT_TOKEN_STORAGE_KEY)
-    || hashParams.has("token")
-    || hashParams.has("access_token");
-  if (!hadAuthParams) return;
+  if (!url.searchParams.has(SEED_AUTH_COMPLETE_PARAM)) return;
   url.searchParams.delete(SEED_AUTH_COMPLETE_PARAM);
-  url.searchParams.delete(SEED_GOOGLE_AUTH_PARAM);
-  url.searchParams.delete(SEED_VAULT_TOKEN_STORAGE_KEY);
-  url.searchParams.delete("token");
-  url.searchParams.delete("access_token");
-  url.hash = "";
   window.history.replaceState(null, "", url.toString());
-}
-
-function seedVaultTokenFromReturnUrl() {
-  const url = new URL(window.location.href);
-  const hashParams = new URLSearchParams(url.hash.startsWith("#") ? url.hash.slice(1) : "");
-  return url.searchParams.get(SEED_VAULT_TOKEN_STORAGE_KEY)
-    || url.searchParams.get("token")
-    || url.searchParams.get("access_token")
-    || hashParams.get(SEED_VAULT_TOKEN_STORAGE_KEY)
-    || hashParams.get("token")
-    || hashParams.get("access_token")
-    || "";
 }
 
 function buildSeedAuthUrl(item) {
@@ -548,33 +513,6 @@ function startSeedAuthFlow(item) {
   }
   showToast("Opening registration");
   window.location.href = buildSeedAuthUrl(item);
-}
-
-function buildSeedGoogleAuthUrl(item) {
-  const defaultPath = seedVaultPath("/api/v2/seed-vault/auth/google/redirect");
-  const target = new URL(SEED_GOOGLE_AUTH_URL || seedApiUrl(defaultPath), window.location.origin);
-  target.searchParams.set("redirect", googleAuthReturnUrl());
-  target.searchParams.set("redirect_uri", googleAuthReturnUrl());
-  target.searchParams.set("return_url", googleAuthReturnUrl());
-  if (item?.seed) target.searchParams.set("seedId", item.seed);
-  if (item?.version) target.searchParams.set("version", item.version);
-  if (item?.dimension) target.searchParams.set("dimension", item.dimension);
-  return target.toString();
-}
-
-function startSeedGoogleAuth() {
-  if (!SEED_VAULT_ENABLED) {
-    showToast("Google login unavailable");
-    return;
-  }
-  const item = pendingSeedVaultAuth?.item || currentFavoritePayload();
-  try {
-    if (item) sessionStorage.setItem(PENDING_LIKED_SEED_STORAGE_KEY, JSON.stringify(item));
-  } catch {
-    // Google auth can still continue; only automatic seed restore may be skipped.
-  }
-  showToast("Opening Google login");
-  window.location.href = buildSeedGoogleAuthUrl(item);
 }
 
 function upsertFavoriteSeed(item) {
@@ -1514,12 +1452,7 @@ async function loadPublicSeedCards() {
 }
 
 async function restorePendingLikedSeed() {
-  const returnedToken = seedVaultTokenFromReturnUrl();
-  if (returnedToken) {
-    writeSeedVaultToken(returnedToken);
-    showToast("Logged in with Google");
-  }
-  if (!seedAuthWasCompleted() && !returnedToken) return;
+  if (!seedAuthWasCompleted()) return;
   let item = null;
   try {
     item = sanitizeFavorite(JSON.parse(sessionStorage.getItem(PENDING_LIKED_SEED_STORAGE_KEY) || "null"));
@@ -1906,7 +1839,6 @@ function bindEvents() {
   els.favoritesClose?.addEventListener("click", () => setFavoritesVisible(false));
   els.refreshPublicSeeds?.addEventListener("click", loadPublicSeedCards);
   els.seedAuthForm?.addEventListener("submit", submitSeedAuth);
-  els.seedGoogleAuth?.addEventListener("click", startSeedGoogleAuth);
   els.seedAuthLoginTab?.addEventListener("click", () => setSeedAuthMode("login"));
   els.seedAuthRegisterTab?.addEventListener("click", () => setSeedAuthMode("register"));
   els.seedAuthClose?.addEventListener("click", () => {
