@@ -8037,3 +8037,27 @@
       --seed-map-calculator-h: 720px;
     }
   }
+
+  /* Keep the desktop sidebar handle inside the calculator so it cannot float over community cards while the page scrolls. */
+  @media (min-width: 701px) {
+    .sidebar .menu-toggle,
+    .sidebar.is-collapsed .menu-toggle,
+    body.sidebar-hidden .sidebar.is-collapsed .menu-toggle,
+    body:not(.sidebar-hidden) .sidebar .menu-toggle {
+      position: absolute !important;
+      left: 100% !important;
+      right: auto !important;
+      top: 50% !important;
+      bottom: auto !important;
+      width: 36px !important;
+      height: 92px !important;
+      transform: translateY(-50%) !important;
+      border-radius: 0 10px 10px 0 !important;
+      z-index: 42 !important;
+    }
+
+    body.sidebar-hidden .sidebar.is-collapsed .menu-toggle {
+      left: 8px !important;
+      border-radius: 10px !important;
+    }
+  }
