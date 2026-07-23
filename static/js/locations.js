@@ -438,7 +438,7 @@ function updateFinderHint() {
   const profile = FINDER_PROFILES[currentFinderProfile()];
   const prefix = profile ? `${profile.label}: ` : "";
   els.finderStatus.textContent = parts.length
-    ? `${prefix}Looking for ${parts.join(" + ")} within ${finderRadius()} blocks. Checking ${finderAttempts()} seeds.`
+    ? `${prefix}Looking for ${parts.join(" + ")} within ${finderRadius()} blocks. Up to ${finderAttempts()} seeds.`
     : "Pick at least one biome or structure.";
   updateFinderSummary();
   updateFinderRadiusPresetState();
@@ -460,7 +460,7 @@ async function searchMatchingSeeds() {
   const profile = currentFinderProfile();
   state.finderBusy = true;
   els.finderBtn.disabled = true;
-  els.finderStatus.textContent = `Searching ${attempts} seeds within ${radius} blocks...`;
+  els.finderStatus.textContent = `Searching up to ${attempts} seeds within ${radius} blocks...`;
   state.finderLastSearch = null;
   state.finderResults = [];
   els.finderResults.innerHTML = "";
@@ -495,9 +495,10 @@ function renderSeedSearchResults(data) {
   const structureEntries = [...structures.entries()];
   const structureDimensions = data.structureDimensions || {};
   const count = data.results?.length || 0;
+  const checked = Number(data.checked) || Number(data.attempts) || 0;
   els.finderStatus.textContent = count
-    ? `${count} good seed${count === 1 ? "" : "s"} found. Best match is first.`
-    : "No good seed found this time. Press Find seeds again.";
+    ? `${count} good seed${count === 1 ? "" : "s"} found after ${checked} checks. Best match is first.`
+    : `No good seed found in ${checked} checks. Press Find seeds again.`;
   els.finderResults.innerHTML = "";
   if (!count) return;
   for (const item of data.results) {

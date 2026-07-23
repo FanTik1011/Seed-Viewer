@@ -9,7 +9,7 @@ import random
 import logging
 import math
 import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed, wait
 from datetime import datetime, timezone
 from functools import lru_cache
 from threading import Lock
@@ -1857,21 +1857,51 @@ def search_seeds():
         }
 
     matches = []
-    with ThreadPoolExecutor(max_workers=min(8, attempts)) as pool:
-        futures = [pool.submit(evaluate, seed) for seed in candidates]
-        for future in as_completed(futures):
-            try:
-                match = future.result()
-            except Exception as exc:
-                log.warning("Seed search candidate failed: %s", exc)
-                continue
-            if match:
-                matches.append(match)
+    checked = 0
+    max_workers = min(8, attempts)
+    queue_size = min(attempts, max_workers * 2)
+    candidate_iter = iter(candidates)
+    submitted = 0
+
+    def submit_next(pool):
+        nonlocal submitted
+        try:
+            seed = next(candidate_iter)
+        except StopIteration:
+            return None
+        submitted += 1
+        return pool.submit(evaluate, seed)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        pending = {future for future in (submit_next(pool) for _ in range(queue_size)) if future}
+        while pending:
+            done, pending = wait(pending, return_when=FIRST_COMPLETED)
+            for future in done:
+                checked += 1
+                try:
+                    match = future.result()
+                except Exception as exc:
+                    log.warning("Seed search candidate failed: %s", exc)
+                    continue
+                if match:
+                    matches.append(match)
+
+            if len(matches) >= limit:
+                for future in pending:
+                    future.cancel()
+                break
+
+            while submitted < attempts and len(pending) < queue_size:
+                future = submit_next(pool)
+                if not future:
+                    break
+                pending.add(future)
 
     matches.sort(key=lambda item: item["score"])
     return jsonify({
         "version": version,
         "attempts": attempts,
+        "checked": checked,
         "radius": max(structure_radius, biome_radius),
         "structureRadius": structure_radius,
         "biomeRadius": biome_radius,
