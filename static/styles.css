@@ -7981,63 +7981,6 @@
     }
   }
 
-  /* Deploy layout: community cards render under the seed map calculator, not as a viewport overlay. */
-  :root {
-    --seed-map-calculator-h: 760px;
-  }
-
-  html,
-  body {
-    height: auto !important;
-    min-height: 100% !important;
-    overflow-x: hidden !important;
-    overflow-y: auto !important;
-  }
-
-  .app {
-    position: relative !important;
-    height: auto !important;
-    min-height: 0 !important;
-    display: block !important;
-    overflow: visible !important;
-    background: #07110f !important;
-  }
-
-  .layout {
-    position: relative !important;
-    inset: auto !important;
-    width: 100% !important;
-    height: var(--seed-map-calculator-h) !important;
-    min-height: 640px !important;
-    overflow: hidden !important;
-  }
-
-  .public-seeds-panel {
-    position: relative !important;
-    left: auto !important;
-    right: auto !important;
-    bottom: auto !important;
-    z-index: 1 !important;
-    height: auto !important;
-    min-height: 210px !important;
-    overflow: hidden !important;
-  }
-
-  .public-seeds-inner {
-    height: auto;
-    grid-template-rows: auto minmax(0, 1fr);
-  }
-
-  .public-seeds-list {
-    min-height: 0;
-  }
-
-  @media (max-width: 900px) {
-    :root {
-      --seed-map-calculator-h: 720px;
-    }
-  }
-
   /* Keep the desktop sidebar handle inside the calculator so it cannot float over community cards while the page scrolls. */
   @media (min-width: 701px) {
     .sidebar .menu-toggle,
