@@ -1,6 +1,9 @@
 const FINDER_PROFILES = {
   balanced: {
     label: "Balanced",
+    seedLabel: "Balanced seed",
+    icon: "village",
+    asset: iconAsset("Village"),
     radius: 1500,
     attempts: 700,
     biomes: [],
@@ -8,6 +11,9 @@ const FINDER_PROFILES = {
   },
   hardcore: {
     label: "Hardcore",
+    seedLabel: "Hardcore seed",
+    icon: "home",
+    asset: iconAsset("spawn"),
     radius: 1800,
     attempts: 1500,
     biomes: [],
@@ -15,6 +21,9 @@ const FINDER_PROFILES = {
   },
   speedrun: {
     label: "Speedrun",
+    seedLabel: "Speedrun seed",
+    icon: "diamond",
+    asset: iconAsset("Stronghold"),
     radius: 3000,
     attempts: 1500,
     biomes: [],
@@ -501,6 +510,11 @@ function renderSeedSearchResults(data) {
     : `No good seed found in ${checked} checks. Press Find seeds again.`;
   els.finderResults.innerHTML = "";
   if (!count) return;
+  const profileKey = FINDER_PROFILES[data.profile] ? data.profile : "";
+  const profileInfo = profileKey ? FINDER_PROFILES[profileKey] : null;
+  const profileBadge = profileInfo
+    ? `<span class="seed-result-profile seed-result-profile-${profileKey}">${iconMarkup(profileInfo.icon, profileInfo.asset)}<b>${profileInfo.seedLabel}</b></span>`
+    : "";
   for (const item of data.results) {
     const biomeLines = biomeIds.map(id => {
       const point = item.biomes?.[id]?.[0];
@@ -520,10 +534,13 @@ function renderSeedSearchResults(data) {
       .find(Boolean);
     const center = firstBiomePoint || firstStructPoint || item.spawn;
     const card = document.createElement("div");
-    card.className = "seed-result-card";
+    card.className = `seed-result-card ${profileKey ? `is-${profileKey}-seed` : ""}`;
     card.innerHTML = `
       <div class="seed-result-head">
-        <span class="seed-mono">${item.seed}</span>
+        <div class="seed-result-title">
+          <span class="seed-mono">${item.seed}</span>
+          ${profileBadge}
+        </div>
         <button class="mini-link load-seed" type="button">Load</button>
       </div>
       <div class="seed-result-meta">
