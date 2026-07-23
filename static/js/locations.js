@@ -1,3 +1,27 @@
+const FINDER_PROFILES = {
+  balanced: {
+    label: "Balanced",
+    radius: 1500,
+    attempts: 700,
+    biomes: [],
+    structures: [["Village", 1], ["Ruined_Portal", 1]]
+  },
+  hardcore: {
+    label: "Hardcore",
+    radius: 1800,
+    attempts: 1500,
+    biomes: [],
+    structures: [["Village", 1], ["Ruined_Portal", 1]]
+  },
+  speedrun: {
+    label: "Speedrun",
+    radius: 3000,
+    attempts: 1500,
+    biomes: [],
+    structures: [["Village", 1], ["Ruined_Portal", 1], ["Stronghold", 1], ["Fortress", 1]]
+  }
+};
+
 function villageLabelAt(x, z) {
   if (isBedrockVersion(state.version)) return STRUCT_META.Village.label;
   const biome = biomeAt(x, z);
@@ -239,10 +263,14 @@ function buildFinderStructurePicker() {
 
 function finderStructureOptions() {
   return FEATURE_CATALOG
-    .filter(feature => feature.supported && feature.key !== "spawn" && feature.key !== "Stronghold")
-    .filter(feature => isFeatureAvailable(feature.key))
+    .filter(feature => feature.supported && feature.key !== "spawn")
+    .filter(feature => isFinderStructureAvailable(feature.key))
     .map(feature => ({ key: feature.key, meta: STRUCT_META[feature.key] }))
     .filter(item => item.meta);
+}
+
+function isFinderStructureAvailable(key) {
+  return ["overworld", "nether", "end"].some(dimension => isFeatureAvailable(key, state.version, dimension));
 }
 
 function makeFinderChip({ value, label, color, icon, asset, selected, count = 0, onClick, onRemove }) {
@@ -294,6 +322,38 @@ function clearFinderResults() {
   if (els.finderResults) els.finderResults.innerHTML = "";
 }
 
+function setFinderProfileMode(mode) {
+  if (els.finderPanel) els.finderPanel.dataset.profile = mode;
+  document.querySelectorAll("[data-finder-profile]").forEach(btn => {
+    btn.classList.toggle("is-active", btn.dataset.finderProfile === mode);
+  });
+}
+
+function currentFinderProfile() {
+  const mode = els.finderPanel?.dataset.profile || "custom";
+  return FINDER_PROFILES[mode] ? mode : "custom";
+}
+
+function setFinderAttempts(value) {
+  if (!els.finderAttempts) return;
+  const attempts = clamp(Number.isFinite(Number(value)) ? Math.round(Number(value)) : 700, 1, 2000);
+  els.finderAttempts.value = String(attempts);
+}
+
+function applyFinderProfile(mode) {
+  const profile = FINDER_PROFILES[mode];
+  if (!profile) return;
+  state.finderBiomes = new Set((profile.biomes || []).map(String));
+  state.finderStructures = new Map(profile.structures || []);
+  setFinderRadius(profile.radius);
+  setFinderAttempts(profile.attempts);
+  setFinderProfileMode(mode);
+  clearFinderResults();
+  buildFinderBiomePicker();
+  buildFinderStructurePicker();
+  updateFinderHint();
+}
+
 function snapshotFinderSearch() {
   if (!state.finderLastSearch || !state.finderResults.length) return null;
   return {
@@ -311,6 +371,7 @@ function restoreFinderSearch(snapshot) {
 }
 
 function toggleFinderBiome(id) {
+  setFinderProfileMode("custom");
   if (state.finderBiomes.has(id)) state.finderBiomes.delete(id);
   else state.finderBiomes.add(id);
   clearFinderResults();
@@ -319,6 +380,7 @@ function toggleFinderBiome(id) {
 }
 
 function addFinderStructure(key) {
+  setFinderProfileMode("custom");
   const next = Math.min((state.finderStructures.get(key) || 0) + 1, 8);
   state.finderStructures.set(key, next);
   clearFinderResults();
@@ -327,6 +389,7 @@ function addFinderStructure(key) {
 }
 
 function removeFinderStructure(key) {
+  setFinderProfileMode("custom");
   const next = (state.finderStructures.get(key) || 0) - 1;
   if (next > 0) state.finderStructures.set(key, next);
   else state.finderStructures.delete(key);
@@ -341,8 +404,8 @@ function finderRadius() {
 }
 
 function finderAttempts() {
-  const value = Number(els.finderAttempts?.value || 100);
-  return clamp(Number.isFinite(value) ? Math.round(value) : 100, 1, 250);
+  const value = Number(els.finderAttempts?.value || 700);
+  return clamp(Number.isFinite(value) ? Math.round(value) : 700, 1, 2000);
 }
 
 function setFinderRadius(value) {
@@ -372,8 +435,10 @@ function updateFinderHint() {
   const parts = [];
   if (biomeCount) parts.push(`${biomeCount} biome${biomeCount === 1 ? "" : "s"}`);
   if (structureCount) parts.push(`${structureCount} structure${structureCount === 1 ? "" : "s"}`);
+  const profile = FINDER_PROFILES[currentFinderProfile()];
+  const prefix = profile ? `${profile.label}: ` : "";
   els.finderStatus.textContent = parts.length
-    ? `Looking for ${parts.join(" + ")} within ${finderRadius()} blocks. ${finderAttempts()} seeds per run.`
+    ? `${prefix}Looking for ${parts.join(" + ")} within ${finderRadius()} blocks. Checking ${finderAttempts()} seeds.`
     : "Pick at least one biome or structure.";
   updateFinderSummary();
   updateFinderRadiusPresetState();
@@ -392,6 +457,7 @@ async function searchMatchingSeeds() {
   const biomeRadius = radius;
   const structureRadius = radius;
   const attempts = finderAttempts();
+  const profile = currentFinderProfile();
   state.finderBusy = true;
   els.finderBtn.disabled = true;
   els.finderStatus.textContent = `Searching ${attempts} seeds within ${radius} blocks...`;
@@ -406,6 +472,7 @@ async function searchMatchingSeeds() {
       structureRadius,
       radius: Math.max(biomeRadius, structureRadius),
       limit: 8,
+      profile,
       required: structures.join(","),
       biomes: biomeIds.join(",")
     });
@@ -426,6 +493,7 @@ function renderSeedSearchResults(data) {
   const biomeIds = (data.biomes || []).map(String);
   const structures = structureCountsFromList(data.required || []);
   const structureEntries = [...structures.entries()];
+  const structureDimensions = data.structureDimensions || {};
   const count = data.results?.length || 0;
   els.finderStatus.textContent = count
     ? `${count} good seed${count === 1 ? "" : "s"} found. Best match is first.`
@@ -439,11 +507,16 @@ function renderSeedSearchResults(data) {
     }).join("");
     const structureLines = structureEntries.map(([key, needed]) => {
       const points = item.structures?.[key] || [];
-      const label = needed > 1 ? `${STRUCT_META[key]?.label || key} x${needed}` : STRUCT_META[key]?.label || key;
+      const dimension = structureDimensions[key] && structureDimensions[key] !== "overworld" ? ` · ${structureDimensions[key]}` : "";
+      const baseLabel = `${STRUCT_META[key]?.label || key}${dimension}`;
+      const label = needed > 1 ? `${baseLabel} x${needed}` : baseLabel;
       return finderResultLine(label, item.nearest?.[key], points[0], points.length);
     }).join("");
     const firstBiomePoint = biomeIds.map(id => item.biomes?.[id]?.[0]).find(Boolean);
-    const firstStructPoint = structureEntries.map(([key]) => item.structures?.[key]?.[0]).find(Boolean);
+    const firstStructPoint = structureEntries
+      .filter(([key]) => (structureDimensions[key] || "overworld") === "overworld")
+      .map(([key]) => item.structures?.[key]?.[0])
+      .find(Boolean);
     const center = firstBiomePoint || firstStructPoint || item.spawn;
     const card = document.createElement("div");
     card.className = "seed-result-card";

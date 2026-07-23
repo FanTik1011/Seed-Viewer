@@ -128,6 +128,7 @@ async function directRequest(type, payload = {}, signal = undefined) {
       biome_radius: String(payload.biomeRadius || payload.radius || 1000),
       structure_radius: String(payload.structureRadius || payload.radius || 1000),
       limit: String(payload.limit || 8),
+      profile: payload.profile || "",
       required: payload.required || "",
       biomes: payload.biomes || ""
     });

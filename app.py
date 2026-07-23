@@ -299,7 +299,7 @@ MAX_STRUCT_H    = 32768
 MAX_STRONGHOLDS = 128
 MAX_STRUCTURES  = 512
 MAX_STRUCTURE_WORKERS = max(2, min(4, (os.cpu_count() or 4) // 2))
-MAX_SEARCH_ATTEMPTS = 250
+MAX_SEARCH_ATTEMPTS = 2000
 MAX_SEARCH_RESULTS  = 24
 MAX_SEARCH_RADIUS   = 6000
 MAX_BIOME_FIND_SAMPLES = 65000
@@ -393,6 +393,11 @@ def _available_structures(version: str, dimension: str = "overworld") -> list[st
         return names
 
     extras = _VERSION_EXTRAS.get(_generation_version(version), set())
+
+    if dimension == "nether":
+        return [name for name in ["Fortress", "Bastion", "Ruined_Portal_Nether"] if name in extras]
+    if dimension == "end":
+        return [name for name in ["End_City", "End_Gateway", "End_Island"] if name in extras]
 
     names = list(OVERWORLD_BASE_STRUCTS)
     for name in ["Ruined_Portal", "Geode", "Ancient_City", "Trail_Ruins", "Trial_Chambers"]:
@@ -795,6 +800,17 @@ def _points_for_structure(seed: int, mc: int, name: str, x: int, z: int, w: int,
                           dimension: str = "overworld", version: str | None = None) -> list[dict]:
     if version and _is_bedrock_version(version):
         return _bedrock_points_for_structure(seed, mc, name, x, z, w, h, dimension, version)
+
+    if name == "Stronghold":
+        arr = (SHPos * MAX_STRONGHOLDS)()
+        n = ctypes_call(lib.get_strongholds, seed, mc, arr, MAX_STRONGHOLDS)
+        x2 = x + w
+        z2 = z + h
+        return [
+            {"x": arr[i].x, "z": arr[i].z, "ring": arr[i].ring}
+            for i in range(n)
+            if x <= arr[i].x <= x2 and z <= arr[i].z <= z2
+        ]
 
     arr = (StructPos * MAX_STRUCTURES)()
     type_id = STRUCT_TYPES[name]
@@ -1716,13 +1732,19 @@ def search_seeds():
     if version not in MC_VERSIONS:
         return error(f"Unknown version: {version!r}")
 
+    profile = request.args.get("profile", "custom").strip().lower()
     attempts = _int_arg('attempts', 80, lo=1, hi=MAX_SEARCH_ATTEMPTS)
     default_radius = _int_arg('radius', 1000, lo=128, hi=MAX_SEARCH_RADIUS)
     structure_radius = _int_arg('structure_radius', default_radius, lo=128, hi=MAX_SEARCH_RADIUS)
     biome_radius = _int_arg('biome_radius', default_radius, lo=256, hi=MAX_SEARCH_RADIUS)
     limit = _int_arg('limit', 8, lo=1, hi=MAX_SEARCH_RESULTS)
 
-    available = set(_available_structures(version, "overworld"))
+    available = (
+        set(_available_structures(version, "overworld")) |
+        set(_available_structures(version, "nether")) |
+        set(_available_structures(version, "end")) |
+        {"Stronghold"}
+    )
     raw_required = request.args.get('required', '')
     required = [name for name in raw_required.split(',') if name in available]
     required_counts = {}
@@ -1738,6 +1760,45 @@ def search_seeds():
     else:
         candidates = [random.randint(-(2**63), 2**63 - 1) for _ in range(attempts)]
 
+    def structure_dimension(name: str) -> str:
+        if name in NETHER_STRUCTS:
+            return "nether"
+        if name in END_STRUCTS:
+            return "end"
+        return "overworld"
+
+    structure_dimensions = {name: structure_dimension(name) for name in required_counts}
+
+    def structure_origin(spawn: dict, name: str) -> dict:
+        dimension = structure_dimension(name)
+        if dimension == "nether":
+            return {"x": round(spawn["x"] / 8), "z": round(spawn["z"] / 8)}
+        return spawn
+
+    def structure_search_radius(name: str) -> int:
+        if profile == "speedrun" and structure_dimension(name) == "nether":
+            return max(128, min(768, round(structure_radius / 8)))
+        return structure_radius
+
+    def hardcore_danger_penalty(seed: int, mc: int, spawn: dict) -> float | None:
+        if profile != "hardcore":
+            return 0.0
+        danger_names = [name for name in ["Outpost", "Mansion", "Ancient_City"] if name in available]
+        penalty = 0.0
+        danger_radius = min(structure_radius, 1400)
+        for name in danger_names:
+            x = spawn["x"] - danger_radius
+            z = spawn["z"] - danger_radius
+            size = danger_radius * 2
+            points = _points_for_structure(seed, mc, name, x, z, size, size, "overworld", version)
+            distance = _nearest_distance(points, spawn)
+            if distance is None:
+                continue
+            if distance < 420:
+                return None
+            penalty += max(0, danger_radius - distance) * 0.35
+        return penalty
+
     def evaluate(seed: int):
         if _is_bedrock_version(version):
             spawn = _bedrock_spawn(seed, mc)
@@ -1752,20 +1813,23 @@ def search_seeds():
         score = 0.0
 
         for name, needed in required_counts.items():
-            x = spawn["x"] - structure_radius
-            z = spawn["z"] - structure_radius
-            size = structure_radius * 2
-            points = _points_for_structure(seed, mc, name, x, z, size, size, "overworld", version)
+            origin = structure_origin(spawn, name)
+            radius = structure_search_radius(name)
+            dimension = structure_dimension(name)
+            x = origin["x"] - radius
+            z = origin["z"] - radius
+            size = radius * 2
+            points = _points_for_structure(seed, mc, name, x, z, size, size, dimension, version)
             if len(points) < needed:
                 return None
-            points.sort(key=lambda p: (p["x"] - spawn["x"]) ** 2 + (p["z"] - spawn["z"]) ** 2)
+            points.sort(key=lambda p: (p["x"] - origin["x"]) ** 2 + (p["z"] - origin["z"]) ** 2)
             chosen = points[:needed]
-            distances = [math.hypot(p["x"] - spawn["x"], p["z"] - spawn["z"]) for p in chosen]
-            if not distances or distances[-1] > structure_radius * 1.42:
+            distances = [math.hypot(p["x"] - origin["x"], p["z"] - origin["z"]) for p in chosen]
+            if not distances or distances[-1] > radius * 1.42:
                 return None
             found[name] = points[:max(8, needed)]
             nearest[name] = round(distances[0])
-            score += sum(distances)
+            score += sum(distances) * (8 if dimension == "nether" else 1)
 
         for biome_id in required_biomes:
             points, _, used_step = _find_nearest_biome_points(
@@ -1776,6 +1840,11 @@ def search_seeds():
             nearest_biomes[str(biome_id)] = points[0]["distance"]
             found_biomes[str(biome_id)] = points
             score += points[0]["distance"] + used_step * 0.1
+
+        danger_penalty = hardcore_danger_penalty(seed, mc, spawn)
+        if danger_penalty is None:
+            return None
+        score += danger_penalty
 
         return {
             "seed": str(seed),
@@ -1806,8 +1875,10 @@ def search_seeds():
         "radius": max(structure_radius, biome_radius),
         "structureRadius": structure_radius,
         "biomeRadius": biome_radius,
+        "profile": profile,
         "required": required,
         "requiredCounts": required_counts,
+        "structureDimensions": structure_dimensions,
         "biomes": required_biomes,
         "results": matches[:limit],
     })

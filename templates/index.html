@@ -207,7 +207,7 @@
     </section>
 
     <!-- Seed Finder drawer — outside map-stage so overflow:hidden doesn't clip it -->
-    <div class="finder-drawer is-hidden" id="finder-panel" aria-hidden="true">
+    <div class="finder-drawer is-hidden" id="finder-panel" aria-hidden="true" data-profile="balanced">
       <div class="finder-head">
         <div class="finder-head-text">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="6.5" cy="6.5" r="4.5" stroke="currentColor" stroke-width="1.6"/><path d="M10 10L14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
@@ -235,6 +235,15 @@
           <div class="finder-chip-list finder-structure-list" id="finder-structure-list"></div>
         </div>
 
+        <div class="finder-section">
+          <div class="finder-pick-head"><span>Profiles</span></div>
+          <div class="finder-radius-presets finder-profile-list">
+            <button class="mini-link is-active" type="button" data-finder-profile="balanced">Balanced</button>
+            <button class="mini-link" type="button" data-finder-profile="hardcore">Hardcore</button>
+            <button class="mini-link" type="button" data-finder-profile="speedrun">Speedrun</button>
+          </div>
+        </div>
+
         <div class="finder-section finder-settings">
           <div class="finder-pick-head"><span>Settings</span></div>
           <div class="finder-grid">
@@ -243,11 +252,11 @@
               <input class="number" id="finder-radius-input" type="number" min="256" max="6000" step="250" value="1500">
             </label>
             <label class="finder-field">
-              <span>Search</span>
+              <span>Seeds checked</span>
               <select class="select" id="finder-attempts-select">
-                <option value="100" selected>Fast</option>
-                <option value="160">Balanced</option>
-                <option value="250">Deep</option>
+                <option value="250">Fast · 250</option>
+                <option value="700" selected>Balanced · 700</option>
+                <option value="1500">Deep · 1,500</option>
               </select>
             </label>
           </div>

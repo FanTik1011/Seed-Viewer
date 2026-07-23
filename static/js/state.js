@@ -113,7 +113,7 @@ const state = {
   biomeVis: Object.fromEntries(Object.keys(BIOME_NAMES).map(id => [id, true])),
   highlightedBiome: null,
   finderBiomes: new Set(["1"]),
-  finderStructures: new Map([["Village", 1]]),
+  finderStructures: new Map([["Village", 1], ["Ruined_Portal", 1]]),
   finderLastSearch: null,
   finderResults: [],
   finderBusy: false,
