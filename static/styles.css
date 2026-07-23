@@ -8132,3 +8132,9 @@
     background: #151628;
     color: #f4f6ff;
   }
+
+  .finder-settings .finder-grid .select {
+    padding-left: 10px !important;
+    padding-right: 24px !important;
+    font-size: 12px !important;
+  }
