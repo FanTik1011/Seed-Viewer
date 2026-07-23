@@ -466,7 +466,6 @@ async function submitSeedAuth(event) {
     pendingSeedVaultAuth = null;
     setSeedAuthVisible(false);
     showToast(registering ? "Account created" : "Logged in");
-    await loadPublicSeedCards();
     if (pending?.item) {
       if (pending.action === "like") await togglePublicSeedLike(pending.item);
       else await addFavoriteSeed(pending.item, { skipAuth: true });
@@ -970,7 +969,6 @@ async function addFavoriteSeed(item, options = {}) {
   const saved = upsertFavoriteSeed(cleanItem);
   writeFavoriteSeeds();
   renderFavoriteSeeds();
-  renderPublicSeedCards();
   updateFavoriteButtons();
   showToast(options.fromAuth ? "Seed saved after registration" : "Seed saved");
 
@@ -984,7 +982,6 @@ async function addFavoriteSeed(item, options = {}) {
       rememberGeneratedPublicPreview(withPreview);
       writeFavoriteSeeds();
       renderFavoriteSeeds();
-      renderPublicSeedCards();
       updateFavoriteButtons();
       queueFrameHeightPost();
     }).catch(err => {
@@ -1000,14 +997,12 @@ async function addFavoriteSeed(item, options = {}) {
     renderFavoriteSeeds();
     updateFavoriteButtons();
     showToast(seedSavedMessage(options.fromAuth ? "Seed saved after registration" : "Seed saved"));
-    await loadPublicSeedCards();
   } catch (err) {
     console.warn("Seed API save unavailable; using local favorites", err);
     if (SEED_VAULT_ENABLED) {
       state.favoriteSeeds = state.favoriteSeeds.filter(seed => !sameSeedItem(seed, saved));
       writeFavoriteSeeds();
       renderFavoriteSeeds();
-      renderPublicSeedCards();
       updateFavoriteButtons();
       if (err?.status === 429) {
         showToast(`Daily limit reached: ${DAILY_SEED_SAVE_LIMIT} seeds`);
@@ -1092,12 +1087,10 @@ async function removeFavoriteSeed(key) {
   state.publicSeeds = state.publicSeeds.filter(seed => !sameSeedItem(seed, removed));
   writeFavoriteSeeds();
   renderFavoriteSeeds();
-  renderPublicSeedCards();
   updateFavoriteButtons();
   showToast("Favorite removed");
   try {
     await deleteFavoriteSeedFromApi(removed);
-    await loadPublicSeedCards();
   } catch (err) {
     console.warn("Seed API delete unavailable; removed locally", err);
   }
@@ -1467,9 +1460,7 @@ async function restorePendingLikedSeed() {
 function initFavoriteSeeds() {
   readFavoriteSeeds();
   renderFavoriteSeeds();
-  renderPublicSeedCards();
   updateFavoriteButtons();
-  loadPublicSeedCards();
   restorePendingLikedSeed();
 }
 
@@ -1837,7 +1828,6 @@ function bindEvents() {
   els.likeActiveSeed?.addEventListener("click", toggleCurrentFavorite);
   els.favoritesBtn?.addEventListener("click", () => setFavoritesVisible(true));
   els.favoritesClose?.addEventListener("click", () => setFavoritesVisible(false));
-  els.refreshPublicSeeds?.addEventListener("click", loadPublicSeedCards);
   els.seedAuthForm?.addEventListener("submit", submitSeedAuth);
   els.seedAuthLoginTab?.addEventListener("click", () => setSeedAuthMode("login"));
   els.seedAuthRegisterTab?.addEventListener("click", () => setSeedAuthMode("register"));
