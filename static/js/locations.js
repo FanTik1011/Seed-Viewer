@@ -5,7 +5,7 @@ const FINDER_PROFILES = {
     icon: "village",
     asset: iconAsset("Village"),
     radius: 1500,
-    attempts: 700,
+    attempts: 50000,
     biomes: [],
     structures: [["Village", 1], ["Ruined_Portal", 1]]
   },
@@ -15,7 +15,7 @@ const FINDER_PROFILES = {
     icon: "home",
     asset: iconAsset("spawn"),
     radius: 1800,
-    attempts: 1500,
+    attempts: 100000,
     biomes: [],
     structures: [["Village", 1], ["Ruined_Portal", 1]]
   },
@@ -25,11 +25,13 @@ const FINDER_PROFILES = {
     icon: "diamond",
     asset: iconAsset("Stronghold"),
     radius: 3000,
-    attempts: 1500,
+    attempts: 200000,
     biomes: [],
     structures: [["Village", 1], ["Ruined_Portal", 1], ["Stronghold", 1], ["Fortress", 1]]
   }
 };
+const FINDER_RESULTS_STORAGE_KEY = "seedmap.finderSearch.v2";
+const FINDER_BATCH_ATTEMPTS = 5000;
 
 function villageLabelAt(x, z) {
   if (isBedrockVersion(state.version)) return STRUCT_META.Village.label;
@@ -329,6 +331,11 @@ function clearFinderResults() {
   state.finderLastSearch = null;
   state.finderResults = [];
   if (els.finderResults) els.finderResults.innerHTML = "";
+  try {
+    localStorage.removeItem(FINDER_RESULTS_STORAGE_KEY);
+  } catch {
+    // Finder results are nice to keep, but not critical.
+  }
 }
 
 function setFinderProfileMode(mode) {
@@ -345,7 +352,7 @@ function currentFinderProfile() {
 
 function setFinderAttempts(value) {
   if (!els.finderAttempts) return;
-  const attempts = clamp(Number.isFinite(Number(value)) ? Math.round(Number(value)) : 700, 1, 2000);
+  const attempts = clamp(Number.isFinite(Number(value)) ? Math.round(Number(value)) : 50000, 1, 200000);
   els.finderAttempts.value = String(attempts);
 }
 
@@ -377,6 +384,26 @@ function restoreFinderSearch(snapshot) {
   state.finderResults = snapshot.data.results || [];
   renderSeedSearchResults(snapshot.data);
   if (snapshot.status && els.finderStatus) els.finderStatus.textContent = snapshot.status;
+}
+
+function persistFinderSearch() {
+  const snapshot = snapshotFinderSearch();
+  if (!snapshot) return;
+  try {
+    localStorage.setItem(FINDER_RESULTS_STORAGE_KEY, JSON.stringify(snapshot));
+  } catch {
+    // Ignore storage limits; in-memory results still stay visible.
+  }
+}
+
+function restoreStoredFinderSearch() {
+  try {
+    const snapshot = JSON.parse(localStorage.getItem(FINDER_RESULTS_STORAGE_KEY) || "null");
+    if (!snapshot?.data?.results?.length) return;
+    restoreFinderSearch(snapshot);
+  } catch {
+    // A corrupt cache should never block the finder UI.
+  }
 }
 
 function toggleFinderBiome(id) {
@@ -413,8 +440,8 @@ function finderRadius() {
 }
 
 function finderAttempts() {
-  const value = Number(els.finderAttempts?.value || 700);
-  return clamp(Number.isFinite(value) ? Math.round(value) : 700, 1, 2000);
+  const value = Number(els.finderAttempts?.value || 50000);
+  return clamp(Number.isFinite(value) ? Math.round(value) : 50000, 1, 200000);
 }
 
 function setFinderRadius(value) {
@@ -453,7 +480,45 @@ function updateFinderHint() {
   updateFinderRadiusPresetState();
 }
 
+function finderBatchSize(totalAttempts) {
+  if (totalAttempts >= 100000) return FINDER_BATCH_ATTEMPTS;
+  if (totalAttempts >= 50000) return 4000;
+  return Math.min(2500, totalAttempts);
+}
+
+function finderSearchSignature({ version, biomeRadius, structureRadius, profile, required, biomes }) {
+  return JSON.stringify({ version, biomeRadius, structureRadius, profile, required, biomes });
+}
+
+function formatFinderCount(value) {
+  return Math.max(0, Math.round(Number(value) || 0)).toLocaleString("en-US");
+}
+
+function mergeSeedSearchData(previous, batch, signature, attemptTarget) {
+  const bySeed = new Map();
+  for (const item of [...(previous?.results || []), ...(batch.results || [])]) {
+    if (!item?.seed) continue;
+    const existing = bySeed.get(String(item.seed));
+    if (!existing || Number(item.score) < Number(existing.score)) bySeed.set(String(item.seed), item);
+  }
+  const results = [...bySeed.values()].sort((a, b) => (Number(a.score) || 0) - (Number(b.score) || 0));
+  const checkedTotal = (Number(previous?.checkedTotal ?? previous?.checked) || 0) + (Number(batch.checked) || 0);
+  return {
+    ...batch,
+    signature,
+    attempts: attemptTarget,
+    attemptTarget,
+    checkedTotal,
+    results
+  };
+}
+
+function sameFinderSearch(signature) {
+  return state.finderLastSearch?.signature === signature ? state.finderLastSearch : null;
+}
+
 async function searchMatchingSeeds() {
+  if (state.finderBusy) return;
   const biomeIds = [...state.finderBiomes];
   const structures = finderStructureRequestList();
   if (!biomeIds.length && !structures.length) {
@@ -467,27 +532,68 @@ async function searchMatchingSeeds() {
   const structureRadius = radius;
   const attempts = finderAttempts();
   const profile = currentFinderProfile();
+  const required = structures.join(",");
+  const biomes = biomeIds.join(",");
+  const signature = finderSearchSignature({
+    version: els.version.value,
+    biomeRadius,
+    structureRadius,
+    profile,
+    required,
+    biomes
+  });
+  let aggregate = sameFinderSearch(signature);
+  if (!aggregate) {
+    clearFinderResults();
+    aggregate = {
+      version: els.version.value,
+      signature,
+      attempts,
+      attemptTarget: attempts,
+      checkedTotal: 0,
+      radius: Math.max(biomeRadius, structureRadius),
+      structureRadius,
+      biomeRadius,
+      profile,
+      required: structures,
+      biomes: biomeIds,
+      results: []
+    };
+  } else {
+    aggregate = { ...aggregate, attemptTarget: attempts, attempts, results: state.finderResults.slice() };
+  }
   state.finderBusy = true;
   els.finderBtn.disabled = true;
-  els.finderStatus.textContent = `Searching up to ${attempts} seeds within ${radius} blocks...`;
-  state.finderLastSearch = null;
-  state.finderResults = [];
-  els.finderResults.innerHTML = "";
+  els.finderStatus.textContent = `Scanning up to ${formatFinderCount(attempts)} seeds within ${radius} blocks...`;
   try {
-    const data = await workerRequest("searchSeeds", {
-      version: els.version.value,
-      attempts,
-      biomeRadius,
-      structureRadius,
-      radius: Math.max(biomeRadius, structureRadius),
-      limit: 8,
-      profile,
-      required: structures.join(","),
-      biomes: biomeIds.join(",")
-    });
-    state.finderLastSearch = data;
-    state.finderResults = data.results || [];
-    renderSeedSearchResults(data);
+    if ((Number(aggregate.checkedTotal) || 0) >= attempts) {
+      renderSeedSearchResults(aggregate);
+      return;
+    }
+    while ((Number(aggregate.checkedTotal) || 0) < attempts) {
+      const checkedSoFar = Number(aggregate.checkedTotal) || 0;
+      const batchAttempts = Math.min(finderBatchSize(attempts), attempts - checkedSoFar);
+      els.finderStatus.textContent = `Scanning ${formatFinderCount(checkedSoFar)} / ${formatFinderCount(attempts)} seeds... ${aggregate.results.length} kept.`;
+      const data = await workerRequest("searchSeeds", {
+        version: els.version.value,
+        attempts: batchAttempts,
+        biomeRadius,
+        structureRadius,
+        radius: Math.max(biomeRadius, structureRadius),
+        limit: 8,
+        profile,
+        stopAtLimit: false,
+        required,
+        biomes
+      });
+      aggregate = mergeSeedSearchData(aggregate, data, signature, attempts);
+      state.finderLastSearch = aggregate;
+      state.finderResults = aggregate.results || [];
+      renderSeedSearchResults(aggregate, { inProgress: (Number(aggregate.checkedTotal) || 0) < attempts });
+      persistFinderSearch();
+      if (!Number(data.checked)) break;
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
   } catch (err) {
     console.error(err);
     els.finderStatus.textContent = "Seed search failed.";
@@ -498,16 +604,19 @@ async function searchMatchingSeeds() {
   }
 }
 
-function renderSeedSearchResults(data) {
+function renderSeedSearchResults(data, options = {}) {
   const biomeIds = (data.biomes || []).map(String);
   const structures = structureCountsFromList(data.required || []);
   const structureEntries = [...structures.entries()];
   const structureDimensions = data.structureDimensions || {};
   const count = data.results?.length || 0;
-  const checked = Number(data.checked) || Number(data.attempts) || 0;
-  els.finderStatus.textContent = count
-    ? `${count} good seed${count === 1 ? "" : "s"} found after ${checked} checks. Best match is first.`
-    : `No good seed found in ${checked} checks. Press Find seeds again.`;
+  const checked = Number(data.checkedTotal ?? data.checked) || Number(data.attempts) || 0;
+  const target = Number(data.attemptTarget || data.attempts) || checked;
+  els.finderStatus.textContent = options.inProgress
+    ? `Scanning ${formatFinderCount(checked)} / ${formatFinderCount(target)} seeds... ${count} kept.`
+    : count
+      ? `${count} good seed${count === 1 ? "" : "s"} kept after ${formatFinderCount(checked)} checks. Best match is first.`
+      : `No good seed found in ${formatFinderCount(checked)} checks. Press Find seeds again.`;
   els.finderResults.innerHTML = "";
   if (!count) return;
   const profileKey = FINDER_PROFILES[data.profile] ? data.profile : "";
@@ -522,7 +631,7 @@ function renderSeedSearchResults(data) {
     }).join("");
     const structureLines = structureEntries.map(([key, needed]) => {
       const points = item.structures?.[key] || [];
-      const dimension = structureDimensions[key] && structureDimensions[key] !== "overworld" ? ` · ${structureDimensions[key]}` : "";
+      const dimension = structureDimensions[key] && structureDimensions[key] !== "overworld" ? ` - ${structureDimensions[key]}` : "";
       const baseLabel = `${STRUCT_META[key]?.label || key}${dimension}`;
       const label = needed > 1 ? `${baseLabel} x${needed}` : baseLabel;
       return finderResultLine(label, item.nearest?.[key], points[0], points.length);

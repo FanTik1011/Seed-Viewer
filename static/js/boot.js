@@ -12,5 +12,6 @@ if (window.matchMedia("(max-width: 700px)").matches) {
 }
 loadCapabilities().finally(() => {
   buildSidebar();
+  restoreStoredFinderSearch();
   hydrateFromUrl();
 });

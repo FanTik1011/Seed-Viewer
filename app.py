@@ -299,7 +299,7 @@ MAX_STRUCT_H    = 32768
 MAX_STRONGHOLDS = 128
 MAX_STRUCTURES  = 512
 MAX_STRUCTURE_WORKERS = max(2, min(4, (os.cpu_count() or 4) // 2))
-MAX_SEARCH_ATTEMPTS = 2000
+MAX_SEARCH_ATTEMPTS = 200000
 MAX_SEARCH_RESULTS  = 24
 MAX_SEARCH_RADIUS   = 6000
 MAX_BIOME_FIND_SAMPLES = 65000
@@ -1734,6 +1734,7 @@ def search_seeds():
 
     profile = request.args.get("profile", "custom").strip().lower()
     attempts = _int_arg('attempts', 80, lo=1, hi=MAX_SEARCH_ATTEMPTS)
+    stop_at_limit = request.args.get("stop_at_limit", "1").strip().lower() not in {"0", "false", "no"}
     default_radius = _int_arg('radius', 1000, lo=128, hi=MAX_SEARCH_RADIUS)
     structure_radius = _int_arg('structure_radius', default_radius, lo=128, hi=MAX_SEARCH_RADIUS)
     biome_radius = _int_arg('biome_radius', default_radius, lo=256, hi=MAX_SEARCH_RADIUS)
@@ -1886,7 +1887,7 @@ def search_seeds():
                 if match:
                     matches.append(match)
 
-            if len(matches) >= limit:
+            if stop_at_limit and len(matches) >= limit:
                 for future in pending:
                     future.cancel()
                 break

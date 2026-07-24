@@ -1803,8 +1803,6 @@ function bindEvents() {
     updateFinderHint();
   });
   els.finderAttempts.addEventListener("change", () => {
-    setFinderProfileMode("custom");
-    clearFinderResults();
     updateFinderHint();
   });
   els.finderBiomeFilter.addEventListener("input", buildFinderBiomePicker);

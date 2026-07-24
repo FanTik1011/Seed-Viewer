@@ -153,6 +153,7 @@ self.onmessage = async event => {
         structure_radius: String(payload.structureRadius || payload.radius || 1000),
         limit: String(payload.limit || 8),
         profile: payload.profile || "",
+        stop_at_limit: payload.stopAtLimit === false ? "0" : "1",
         required: payload.required || "",
         biomes: payload.biomes || ""
       });
